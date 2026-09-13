@@ -4,8 +4,8 @@ import { INITIAL_CATEGORIES } from './data/categories';
 import { INITIAL_PRODUCTS } from './data/products';
 import { INITIAL_BANNERS } from './data/banners';
 import { INITIAL_TREND_CAMPAIGNS, INITIAL_TREND_HASHTAGS } from './data/trends';
-import { subscribeToOrdersForUser, subscribeToAllOrders, subscribeToProducts, seedProductsToFirestore, saveProductToFirestore, deleteProductFromFirestore, updateOrderStatusInFirestore } from './firebase';
-import { fetchCurrentUser, logoutApi, mirrorProductsToFlask, saveFlaskProduct, deleteFlaskProduct } from './api';
+import { subscribeToOrdersForUser, subscribeToAllOrders, updateOrderStatusInFirestore } from './firebase';
+import { fetchCurrentUser, logoutApi, getFlaskProducts, mirrorProductsToFlask, saveFlaskProduct, deleteFlaskProduct } from './api';
 import { Header } from './components/Header';
 import { BottomNavigation } from './components/BottomNavigation';
 import { ProductCard } from './components/ProductCard';
@@ -77,21 +77,47 @@ export const App: React.FC = () => {
   }, [user?.uid, user?.isAdmin]);
 
   useEffect(() => {
-    let seeded = false;
-    return subscribeToProducts((remoteProducts) => {
-      if (remoteProducts.length > 0) {
-        setProducts(remoteProducts);
-        if (user?.isAdmin) {
-          mirrorProductsToFlask(remoteProducts).catch((error) => console.error('Flask product mirror failed:', error));
+    let cancelled = false;
+    const loadProducts = async () => {
+      try {
+        const flaskProducts = await getFlaskProducts<Product>();
+        if (cancelled) return;
+        if (flaskProducts.length > 0) {
+          setProducts(flaskProducts);
+          return;
         }
-        return;
+
+        if (user?.isAdmin) {
+          // One-time legacy migration only when Flask has no products yet.
+          // The normal application path no longer subscribes to Firestore products.
+          const { subscribeToProducts } = await import('./firebase');
+          let unsubscribe: (() => void) | null = null;
+          unsubscribe = subscribeToProducts((legacyProducts) => {
+            unsubscribe?.();
+            if (cancelled) return;
+            if (legacyProducts.length > 0) {
+              mirrorProductsToFlask(legacyProducts).then(async () => {
+                if (cancelled) return;
+                const migrated = await getFlaskProducts<Product>();
+                setProducts(migrated.length > 0 ? migrated : legacyProducts);
+              }).catch((error) => {
+                console.error('Legacy product migration failed:', error);
+                setProducts(legacyProducts);
+              });
+            } else {
+              mirrorProductsToFlask(INITIAL_PRODUCTS).then(() => !cancelled && setProducts(INITIAL_PRODUCTS)).catch((error) => {
+                console.error('Initial product bootstrap failed:', error);
+              });
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Flask products load failed:', error);
+        if (!cancelled) setProducts(INITIAL_PRODUCTS);
       }
-      if (user?.isAdmin && !seeded) {
-        seeded = true;
-        seedProductsToFirestore(INITIAL_PRODUCTS).catch((error) => console.error('Product seed failed:', error));
-        mirrorProductsToFlask(INITIAL_PRODUCTS).catch((error) => console.error('Flask initial product mirror failed:', error));
-      }
-    });
+    };
+    void loadProducts();
+    return () => { cancelled = true; };
   }, [user?.isAdmin]);
 
   useEffect(() => { localStorage.setItem('altakhfid_cart', JSON.stringify(cartItems)); }, [cartItems]);
@@ -173,7 +199,27 @@ export const App: React.FC = () => {
       <WishlistModal isOpen={isWishlistOpen} wishlistProducts={wishlistProducts} currency={currency} onClose={() => setIsWishlistOpen(false)} onToggleWishlist={handleToggleWishlist} onAddToCart={handleAddToCart} onSelectProduct={(product) => { setIsWishlistOpen(false); setSelectedProduct(product); }}/>
       <CategoryModal isOpen={isCategoryModalOpen} categories={categories} selectedCategoryId={selectedCategoryId} onClose={() => setIsCategoryModalOpen(false)} onSelectCategory={(id) => { setSelectedCategoryId(id); setActiveTab('home'); }}/>
       <SearchModal isOpen={isSearchOpen} products={products} currency={currency} onClose={() => setIsSearchOpen(false)} onSelectProduct={setSelectedProduct}/>
-      <AdminModal isOpen={isAdminOpen} orders={orders} products={products} campaigns={campaigns} onClose={() => setIsAdminOpen(false)} onUpdateOrderStatus={(orderId, status, isPaid) => { setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, isPaid: isPaid ?? order.isPaid } : order)); updateOrderStatusInFirestore(orderId, status, isPaid).catch((error) => { console.error(error); showToast('فشل تحديث الطلب في قاعدة البيانات', 'error'); }); }} onSaveProduct={(product) => { setProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]); Promise.all([saveProductToFirestore(product), saveFlaskProduct(product)]).then(() => showToast('تم حفظ المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حفظ المنتج', 'error'); }); }} onDeleteProduct={(productId) => { setProducts((current) => current.filter((item) => item.id !== productId)); Promise.all([deleteProductFromFirestore(productId), deleteFlaskProduct(productId)]).then(() => showToast('تم حذف المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حذف المنتج', 'error'); }); }} onUpdateCampaigns={setCampaigns} onShowToast={showToast}/>
+      <AdminModal
+        isOpen={isAdminOpen}
+        orders={orders}
+        products={products}
+        campaigns={campaigns}
+        onClose={() => setIsAdminOpen(false)}
+        onUpdateOrderStatus={(orderId, status, isPaid) => {
+          setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, isPaid: isPaid ?? order.isPaid } : order));
+          updateOrderStatusInFirestore(orderId, status, isPaid).catch((error) => { console.error(error); showToast('فشل تحديث الطلب في قاعدة البيانات', 'error'); });
+        }}
+        onSaveProduct={(product) => {
+          setProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]);
+          saveFlaskProduct(product).then(() => showToast('تم حفظ المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حفظ المنتج في الخادم', 'error'); });
+        }}
+        onDeleteProduct={(productId) => {
+          setProducts((current) => current.filter((item) => item.id !== productId));
+          deleteFlaskProduct(productId).then(() => showToast('تم حذف المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حذف المنتج من الخادم', 'error'); });
+        }}
+        onUpdateCampaigns={setCampaigns}
+        onShowToast={showToast}
+      />
       <OrdersModal isOpen={isOrdersOpen} orders={orders} currency={currency} onClose={() => setIsOrdersOpen(false)} onOpenSupport={() => { setIsOrdersOpen(false); setIsSupportOpen(true); }} onOpenOrderChat={(order) => setSelectedChatOrder(order)}/>
       <AuthModal isOpen={isAuthOpen} user={user} onClose={() => setIsAuthOpen(false)} onLogin={setUser} onLogout={handleLogout} onShowToast={showToast}/>
       <CustomerChatModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)}/>
