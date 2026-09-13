@@ -19,6 +19,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
 export interface ApiUser { uid: string; phone: string; firstName?: string; secondName?: string; thirdName?: string; lastName?: string; governorate?: string; role?: 'admin' | 'customer'; isAdmin?: boolean; createdAt?: string; lastLoginAt?: string; updatedAt?: string; }
 export interface VerifySessionResponse { success: boolean; accessToken: string; tokenType: 'Bearer'; expiresAt: string; user: ApiUser; }
+export interface FlaskContent { categories: any[]; banners: any[]; campaigns: any[]; }
 
 export async function fetchCurrentUser(): Promise<ApiUser | null> {
   if (!getAccessToken()) return null;
@@ -43,4 +44,6 @@ export async function updateFlaskOrderStatus(orderId: string, status: string, is
 export async function getOrderChat(orderId: string) { return apiFetch<{ success: boolean; messages: any[] }>(`/takhfid/api/v2/orders/${encodeURIComponent(orderId)}/chat`); }
 export async function sendOrderChatMessageApi(orderId: string, message: { type: string; text?: string; imageUrl?: string }) { return apiFetch<{ success: boolean; message: any }>(`/takhfid/api/v2/orders/${encodeURIComponent(orderId)}/chat/messages`, { method: 'POST', body: JSON.stringify(message) }); }
 export async function uploadPaymentProofApi(orderId: string, file: File, note = '') { const form = new FormData(); form.append('file', file); form.append('note', note); return apiFetch<{ success: boolean; order: any; message: any; url: string }>(`/takhfid/api/v2/orders/${encodeURIComponent(orderId)}/payment-proof/upload`, { method: 'POST', body: form }); }
+export async function getFlaskContent(): Promise<FlaskContent> { const result = await apiFetch<{ success: boolean; content: FlaskContent }>('/takhfid/admin/api/content'); return result.content || { categories: [], banners: [], campaigns: [] }; }
+export async function saveFlaskContent(content: Partial<FlaskContent>): Promise<FlaskContent> { const result = await apiFetch<{ success: boolean; content: FlaskContent }>('/takhfid/admin/api/content', { method: 'PUT', body: JSON.stringify(content) }); return result.content; }
 export { API_BASE_URL };
