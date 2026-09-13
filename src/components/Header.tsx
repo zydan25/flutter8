@@ -23,14 +23,16 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSearch,
   onOpenCart,
   onOpenWishlist,
-  onOpenAdmin,
   onOpenAuth,
   onToggleCurrency,
 }) => {
+  const openFlaskAdmin = () => {
+    window.open('/takhfid/admin/', '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-xs">
       <div className="max-w-7xl mx-auto px-3.5 py-2.5 flex items-center justify-between gap-2 sm:gap-4">
-        {/* Brand Logo & Name */}
         <div className="flex items-center gap-2 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-700 via-purple-600 to-indigo-600 flex items-center justify-center text-white font-black text-lg shadow-sm shadow-purple-500/20">
             <span className="text-[#F0A717] ml-0.5">ص</span>
@@ -44,80 +46,22 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Quick Search Bar Trigger */}
-        <button
-          onClick={onOpenSearch}
-          className="flex-1 max-w-md hidden sm:flex items-center gap-2 bg-slate-100/80 hover:bg-slate-100 text-slate-400 px-3.5 py-2 rounded-full text-xs font-medium transition-all border border-slate-200/50"
-        >
+        <button onClick={onOpenSearch} className="flex-1 max-w-md hidden sm:flex items-center gap-2 bg-slate-100/80 hover:bg-slate-100 text-slate-400 px-3.5 py-2 rounded-full text-xs font-medium transition-all border border-slate-200/50">
           <Search className="w-4 h-4 text-slate-400" />
           <span>ابحث عن فساتين، أحذية، ملابس كاجوال، أو عروض...</span>
         </button>
 
-        {/* Action Buttons */}
         <div className="flex items-center gap-1 sm:gap-2">
-          {/* Mobile Search Icon */}
-          <button
-            onClick={onOpenSearch}
-            className="sm:hidden p-2 rounded-full text-slate-600 hover:bg-slate-100 active:scale-95 transition-all"
-            aria-label="بحث"
-          >
-            <Search className="w-5 h-5" />
-          </button>
-
-          {/* Currency Switcher */}
-          <button
-            onClick={onToggleCurrency}
-            className="text-[11px] font-bold px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200/60 transition-all active:scale-95"
-            title="تبديل العملة"
-          >
-            {currency === 'YER' ? 'ريال يمني' : 'ريال سعودي'}
-          </button>
-
-          {/* Wishlist Button */}
-          <button
-            onClick={onOpenWishlist}
-            className="relative p-2 rounded-full text-slate-700 hover:bg-slate-100 active:scale-95 transition-all"
-            aria-label="المفضلة"
-          >
-            <Heart className="w-5 h-5" />
-            {wishlistCount > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                {wishlistCount}
-              </span>
-            )}
-          </button>
-
-          {/* Cart Button */}
-          <button
-            onClick={onOpenCart}
-            className="relative p-2 rounded-full text-slate-700 hover:bg-slate-100 active:scale-95 transition-all"
-            aria-label="سلة التسوق"
-          >
-            <ShoppingBag className="w-5 h-5 text-purple-700" />
-            {cartCount > 0 && (
-              <span className="absolute top-1 right-1 w-4 h-4 bg-purple-700 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse-subtle">
-                {cartCount}
-              </span>
-            )}
-          </button>
-
-          {/* User / Admin Button */}
+          <button onClick={onOpenSearch} className="sm:hidden p-2 rounded-full text-slate-600 hover:bg-slate-100 active:scale-95 transition-all" aria-label="بحث"><Search className="w-5 h-5" /></button>
+          <button onClick={onToggleCurrency} className="text-[11px] font-bold px-2 py-1 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200/60 transition-all active:scale-95" title="تبديل العملة">{currency === 'YER' ? 'ريال يمني' : 'ريال سعودي'}</button>
+          <button onClick={onOpenWishlist} className="relative p-2 rounded-full text-slate-700 hover:bg-slate-100 active:scale-95 transition-all" aria-label="المفضلة"><Heart className="w-5 h-5" />{wishlistCount > 0 && <span className="absolute top-1 right-1 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">{wishlistCount}</span>}</button>
+          <button onClick={onOpenCart} className="relative p-2 rounded-full text-slate-700 hover:bg-slate-100 active:scale-95 transition-all" aria-label="سلة التسوق"><ShoppingBag className="w-5 h-5 text-purple-700" />{cartCount > 0 && <span className="absolute top-1 right-1 w-4 h-4 bg-purple-700 text-white text-[9px] font-bold rounded-full flex items-center justify-center animate-pulse-subtle">{cartCount}</span>}</button>
           {user?.isAdmin ? (
-            <button
-              onClick={onOpenAdmin}
-              className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300/80 px-2 py-1 rounded-lg text-xs font-bold transition-all active:scale-95"
-            >
-              <ShieldCheck className="w-4 h-4 text-amber-600" />
-              <span className="hidden sm:inline">الإدارة</span>
+            <button onClick={openFlaskAdmin} className="flex items-center gap-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300/80 px-2 py-1 rounded-lg text-xs font-bold transition-all active:scale-95" title="فتح لوحة الإدارة على Flask">
+              <ShieldCheck className="w-4 h-4 text-amber-600" /><span className="hidden sm:inline">الإدارة</span>
             </button>
           ) : (
-            <button
-              onClick={onOpenAuth}
-              className="p-2 rounded-full text-slate-700 hover:bg-slate-100 active:scale-95 transition-all"
-              aria-label="الحساب"
-            >
-              <User className="w-5 h-5" />
-            </button>
+            <button onClick={onOpenAuth} className="p-2 rounded-full text-slate-700 hover:bg-slate-100 active:scale-95 transition-all" aria-label="الحساب"><User className="w-5 h-5" /></button>
           )}
         </div>
       </div>
