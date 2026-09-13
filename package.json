@@ -4,15 +4,19 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
     "lint": "echo 'No lint errors'"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "firebase": "^12.19.0",
+    "html2canvas": "^1.4.1",
     "lucide-react": "^0.546.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "sharp": "^0.35.4"
+    "sharp": "^0.35.4",
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

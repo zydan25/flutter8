@@ -1,0 +1,91 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile data for registered customers and admins",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "firstName": { "type": "string" },
+        "secondName": { "type": "string" },
+        "thirdName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "phone": { "type": "string" },
+        "avatar": { "type": "string" },
+        "governorate": { "type": "string" },
+        "authProvider": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Customer order details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "Customer support conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "customerId": { "type": "string" }
+      },
+      "required": ["id"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Individual message within a support chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "chatId": { "type": "string" },
+        "text": { "type": "string" }
+      },
+      "required": ["id", "chatId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User accounts and customer registry"
+    },
+    "/deleted_users/{userId}": {
+      "schema": "User",
+      "description": "Tombstones for deleted accounts synchronized across all devices"
+    },
+    "/admin_roles/{userId}": {
+      "schema": "User",
+      "description": "Admin roles and permissions registry synchronized across all devices"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Store orders collection"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Support chat rooms"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages inside a support chat"
+    },
+    "/test/{docId}": {
+      "schema": "User",
+      "description": "Firebase connection diagnostic test document"
+    }
+  }
+}

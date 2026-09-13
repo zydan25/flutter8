@@ -1,0 +1,6 @@
+{
+  "name": "التخفيض الصح",
+  "description": "تطبيق متجر إلكتروني لبيع الملابس والعروض وأقوى التخفيضات باللغة العربية بتصميم عصري لشاشات الأندرويد",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
