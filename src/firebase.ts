@@ -6,7 +6,7 @@ import type { Unsubscribe } from 'firebase/firestore';
 import type { Order, Product, User, ChatMessage } from './types';
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyAKilRP9uw5l9ZPIw4zMXuLcKU-9yzxOI",
+  apiKey: "AIzaSyAKilRP9uw5l9ZPIw54zMXuLcKU-9yzxOI",
   authDomain: "valued-leaf-npthm.firebaseapp.com",
   projectId: "valued-leaf-npthm",
   storageBucket: "valued-leaf-npthm.firebasestorage.app",
@@ -25,9 +25,9 @@ const toOrder = (data: Record<string, unknown>, id: string): Order => ({ ...(dat
 const toMessage = (data: Record<string, unknown>, id: string): ChatMessage => ({ ...(data as unknown as ChatMessage), id: String(data.id ?? id) });
 
 export async function fetchUserProfile(uid: string): Promise<User | null> { const snapshot = await getDoc(doc(db, 'users', uid)); return snapshot.exists() ? toUser(snapshot.data(), snapshot.id) : null; }
-export async function syncUserToFirestore(user: User): Promise<void> { await setDoc(doc(db, 'users', user.uid), { ...user, updatedAt: new Date().toISOString() }, { merge: true }); }
+export async function syncUserToFirestore(user: User): Promise<void> { await setDoc(doc(db, 'users', user.uid), { ...user, updatedAt: new Date().toISOString() } as Record<string, unknown>, { merge: true }); }
 export async function deleteUserFromFirestore(uid: string): Promise<void> { await deleteDoc(doc(db, 'users', uid)); }
-export async function updateOrderStatusInFirestore(orderId: string, status: Order['status'], isPaid?: boolean): Promise<void> { const payload: Record<string, unknown> = { status, updatedAt: new Date().toISOString() }; if (typeof isPaid === 'boolean') payload.isPaid = isPaid; if (isPaid) payload.paymentConfirmedAt = new Date().toISOString(); await updateDoc(doc(db, 'orders', orderId), payload); }
+export async function updateOrderStatusInFirestore(orderId: string, status: Order['status'], isPaid?: boolean): Promise<void> { const payload: { status: Order['status']; updatedAt: string; isPaid?: boolean; paymentConfirmedAt?: string } = { status, updatedAt: new Date().toISOString() }; if (typeof isPaid === 'boolean') payload.isPaid = isPaid; if (isPaid) payload.paymentConfirmedAt = new Date().toISOString(); await updateDoc(doc(db, 'orders', orderId), payload); }
 export async function markPaymentSubmitted(orderId: string, proofUrl: string, note?: string): Promise<void> { await updateDoc(doc(db, 'orders', orderId), { status: 'payment_submitted', paymentProofUrl: proofUrl, paymentNote: note || '', updatedAt: new Date().toISOString() }); }
 export async function fetchAllUsersFromFirestore(): Promise<User[]> { const snapshot = await getDocs(collection(db, 'users')); return snapshot.docs.map((d) => toUser(d.data(), d.id)); }
 export async function fetchAllOrdersFromFirestore(): Promise<Order[]> { const snapshot = await getDocs(collection(db, 'orders')); return snapshot.docs.map((d) => toOrder(d.data(), d.id)); }
