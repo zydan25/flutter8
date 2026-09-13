@@ -5,6 +5,7 @@ import { collection, deleteDoc, doc, getDoc, getDocs, getFirestore, onSnapshot, 
 import type { Unsubscribe } from 'firebase/firestore';
 import type { Order, Product, User, ChatMessage } from './types';
 import { deleteFlaskCustomer, fetchCurrentUser, getFlaskCustomers, mirrorCustomersToFlask, updateMyProfileApi, apiFetch, getAccessToken } from './api';
+import { mirrorOrdersToFlask } from './orderService';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyAKilRP9uw5l9ZPIw54zMXuLcKU-9yzxOI",
@@ -31,10 +32,7 @@ export async function fetchUserProfile(uid: string): Promise<User | null> {
   return current && current.uid === uid ? current as User : null;
 }
 
-export async function syncUserToFirestore(user: User): Promise<void> {
-  await updateMyProfileApi({ firstName: user.firstName, secondName: user.secondName, thirdName: user.thirdName, lastName: user.lastName, governorate: user.governorate });
-}
-
+export async function syncUserToFirestore(user: User): Promise<void> { await updateMyProfileApi({ firstName: user.firstName, secondName: user.secondName, thirdName: user.thirdName, lastName: user.lastName, governorate: user.governorate }); }
 export async function deleteUserFromFirestore(uid: string): Promise<void> { await deleteFlaskCustomer(uid); }
 
 export async function fetchAllUsersFromFirestore(): Promise<User[]> {
@@ -47,21 +45,21 @@ export async function fetchAllUsersFromFirestore(): Promise<User[]> {
   return users;
 }
 
-export async function migrateLegacyUsersToFlask(): Promise<void> {
-  const snapshot = await getDocs(collection(db, 'users'));
-  if (snapshot.empty) return;
-  const users = snapshot.docs.map((d) => toUser(d.data(), d.id));
-  await mirrorCustomersToFlask(users);
-}
+export async function migrateLegacyUsersToFlask(): Promise<void> { const snapshot = await getDocs(collection(db, 'users')); if (snapshot.empty) return; await mirrorCustomersToFlask(snapshot.docs.map((d) => toUser(d.data(), d.id))); }
 
 // Orders now use Flask as the active source. These function names remain temporarily for compatibility.
-export async function updateOrderStatusInFirestore(orderId: string, status: Order['status'], isPaid?: boolean): Promise<void> {
-  await apiFetch(`/takhfid/api/v2/orders/${encodeURIComponent(orderId)}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...(typeof isPaid === 'boolean' ? { isPaid } : {}) }) });
-}
+export async function updateOrderStatusInFirestore(orderId: string, status: Order['status'], isPaid?: boolean): Promise<void> { await apiFetch(`/takhfid/api/v2/orders/${encodeURIComponent(orderId)}/status`, { method: 'PATCH', body: JSON.stringify({ status, ...(typeof isPaid === 'boolean' ? { isPaid } : {}) }) }); }
+export async function fetchAllOrdersFromFirestore(): Promise<Order[]> { const snapshot = await getDocs(collection(db, 'orders')); return snapshot.docs.map((d) => toOrder(d.data(), d.id)); }
 
-export async function fetchAllOrdersFromFirestore(): Promise<Order[]> {
-  const snapshot = await getDocs(collection(db, 'orders'));
-  return snapshot.docs.map((d) => toOrder(d.data(), d.id));
+async function migrateLegacyOrdersIfNeeded(): Promise<void> {
+  try {
+    const result = await apiFetch<{ success: boolean; orders: Order[] }>('/takhfid/api/v2/orders');
+    if ((result.orders || []).length > 0) return;
+    const snapshot = await getDocs(collection(db, 'orders'));
+    if (!snapshot.empty) await mirrorOrdersToFlask(snapshot.docs.map((d) => toOrder(d.data(), d.id)));
+  } catch (error) {
+    console.error('Legacy order migration failed:', error);
+  }
 }
 
 export function subscribeToOrdersForUser(uid: string, onChange: (orders: Order[]) => void): Unsubscribe {
@@ -83,10 +81,19 @@ export function subscribeToOrdersForUser(uid: string, onChange: (orders: Order[]
 
 export function subscribeToAllOrders(onChange: (orders: Order[]) => void): Unsubscribe {
   let active = true;
+  let migrated = false;
   const load = async () => {
     if (!active || !getAccessToken()) return;
     try {
       const result = await apiFetch<{ success: boolean; orders: Order[] }>('/takhfid/api/v2/orders');
+      if ((result.orders || []).length === 0 && !migrated) {
+        migrated = true;
+        await migrateLegacyOrdersIfNeeded();
+        if (!active) return;
+        const refreshed = await apiFetch<{ success: boolean; orders: Order[] }>('/takhfid/api/v2/orders');
+        onChange((refreshed.orders || []).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
+        return;
+      }
       if (active) onChange((result.orders || []).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
     } catch (error) {
       console.error('Flask admin orders load failed:', error);
@@ -98,9 +105,7 @@ export function subscribeToAllOrders(onChange: (orders: Order[]) => void): Unsub
   return () => { active = false; window.clearInterval(timer); };
 }
 
-export async function markPaymentSubmitted(orderId: string, proofUrl: string, note?: string): Promise<void> {
-  await updateDoc(doc(db, 'orders', orderId), { status: 'payment_submitted', paymentProofUrl: proofUrl, paymentNote: note || '', updatedAt: new Date().toISOString() });
-}
+export async function markPaymentSubmitted(orderId: string, proofUrl: string, note?: string): Promise<void> { await updateDoc(doc(db, 'orders', orderId), { status: 'payment_submitted', paymentProofUrl: proofUrl, paymentNote: note || '', updatedAt: new Date().toISOString() }); }
 
 // Legacy product functions remain temporarily for the one-time migration only.
 export function subscribeToProducts(onChange: (products: Product[]) => void): Unsubscribe { return onSnapshot(collection(db, 'products'), (snapshot) => onChange(snapshot.docs.map((d) => ({ ...d.data(), id: d.id } as Product))), (error) => { console.error('Products subscription failed:', error); onChange([]); }); }
