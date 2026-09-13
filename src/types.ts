@@ -64,7 +64,31 @@ export interface SubCategory { id: string; name: string; image: string; category
 export interface StyleTab { id: string; name: string; image: string; categoryId: string; }
 export interface SideCategory { id: string; name: string; iconName?: string; }
 export interface Category { id: string; name: string; iconName?: string; itemCount?: number; image?: string; badge?: string; subCategories?: SubCategory[]; styleTabs?: StyleTab[]; sideCategories?: SideCategory[]; banners?: Banner[]; }
-export interface Banner { id: string; categoryId?: string; title: string; subtitle?: string; badge?: string; code?: string; image: string; discount?: string; bgGradient?: string; themeColor?: string; buttonText?: string; }
+export interface BannerTab { id: string; name: string; title?: string; image?: string; badge?: string; order?: number; linkedProductIds?: string[]; }
+export interface Banner {
+  id: string;
+  categoryId?: string;
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  code?: string;
+  image: string;
+  discount?: string;
+  bgGradient?: string;
+  themeColor?: string;
+  buttonText?: string;
+  targetType?: string;
+  categoryTarget?: string;
+  targetSubCategory?: string;
+  targetStyleTab?: string;
+  targetTrend?: string;
+  pullToRefreshTitle?: string;
+  pullToRefreshSubtitle?: string;
+  slideDuration?: number;
+  isActive?: boolean;
+  order?: number;
+  subScreenTabs?: BannerTab[];
+}
 export interface TrendCampaign { id: string; hashtag: string; title: string; badge?: string; daysLeft?: string; bgImage: string; productIds: string[]; isActive: boolean; order: number; }
 export interface TrendHashtag { id: string; tag: string; count?: number; isActive?: boolean; order?: number; }
 export interface CartItem { product: Product; quantity: number; selectedColor?: string; selectedSize?: string; price: number; }
