@@ -17,15 +17,14 @@ export const convertBasePrice = (price: number, currency: Currency, governorate?
   return markedPrice < 1000 ? Math.round(markedPrice * rate.sarToYerRate) : Math.round(markedPrice);
 };
 
-export const getDeliveryFee = (governorate?: string): number => {
+export const getDeliveryFee = (governorate?: string): number => Number(getGovernorateRate(governorate).deliveryFee ?? 0);
+export const getDeliveryFeeForCurrency = (governorate: string | undefined, currency: Currency): number => {
   const rate = getGovernorateRate(governorate);
-  return rate.freeDeliveryIncluded ? 0 : 2500;
+  return currency === 'SAR' ? Math.round(getDeliveryFee(governorate) / rate.sarToYerRate) : getDeliveryFee(governorate);
 };
 
 export const formatCurrencyPrice = (price?: number | null, currency: Currency = 'YER', governorate?: string): string => {
-  if (price === undefined || price === null || Number.isNaN(Number(price))) {
-    return currency === 'SAR' ? '0 ر.س' : '0 ر.ي';
-  }
+  if (price === undefined || price === null || Number.isNaN(Number(price))) return currency === 'SAR' ? '0 ر.س' : '0 ر.ي';
   const converted = convertBasePrice(Number(price), currency, governorate);
   return `${converted.toLocaleString('ar-YE')} ${currency === 'SAR' ? 'ر.س' : 'ر.ي'}`;
 };
