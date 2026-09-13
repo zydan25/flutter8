@@ -1,0 +1,107 @@
+name: Wire admin settings and self hosted auth
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/patch-settings-server.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Patch source files
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          auth = Path('src/auth.ts')
+          auth.write_text(r'''import { getFunctions, httpsCallable } from 'firebase/functions';
+import { app } from './firebase';
+
+const apiBaseUrl = String(import.meta.env.VITE_API_BASE_URL || '').replace(/\\/$/, '');
+const functions = getFunctions(app, 'us-central1');
+
+export interface SendOtpResponse { success: boolean; phoneNumber: string; expiresInSeconds: number; retryAfterSeconds: number; }
+export interface VerifyOtpResponse {
+  success: boolean;
+  customToken: string;
+  user: { uid: string; phone: string; firstName?: string; secondName?: string; thirdName?: string; lastName?: string; governorate?: string; role?: 'admin' | 'customer'; isAdmin?: boolean; createdAt?: string; lastLoginAt?: string; updatedAt?: string; };
+}
+
+async function requestServer<T>(path: string, body: unknown): Promise<T> {
+  if (!apiBaseUrl) throw new Error('لم يتم ضبط رابط خادم المصادقة. أضف VITE_API_BASE_URL عند بناء التطبيق.');
+  const response = await fetch(`${apiBaseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(String(payload.error || 'تعذر الاتصال بخادم المصادقة'));
+  return payload as T;
+}
+
+export async function sendWhatsAppOtp(data: { phoneNumber: string }): Promise<{ data: SendOtpResponse }> {
+  if (apiBaseUrl) return { data: await requestServer<SendOtpResponse>('/api/auth/send-otp', data) };
+  const callable = httpsCallable<{ phoneNumber: string }, SendOtpResponse>(functions, 'sendWhatsAppOtp');
+  return { data: (await callable(data)).data };
+}
+
+export async function verifyWhatsAppOtp(data: { phoneNumber: string; otp: string; firstName: string; secondName?: string; thirdName?: string; lastName?: string; governorate: string; }): Promise<{ data: VerifyOtpResponse }> {
+  if (apiBaseUrl) return { data: await requestServer<VerifyOtpResponse>('/api/auth/verify-otp', data) };
+  const callable = httpsCallable<typeof data, VerifyOtpResponse>(functions, 'verifyWhatsAppOtp');
+  return { data: (await callable(data)).data };
+}
+''', encoding='utf-8')
+
+          admin = Path('src/components/AdminModal.tsx')
+          s = admin.read_text()
+          s = s.replace("import { fetchAllUsersFromFirestore, deleteUserFromFirestore, updateOrderStatusInFirestore } from '../firebase';", "import { fetchAllUsersFromFirestore, deleteUserFromFirestore, updateOrderStatusInFirestore } from '../firebase';\nimport { AdminPricingSettings } from './AdminPricingSettings';\nimport { getPricingSettings, subscribeToPricingSettings } from '../adminSettingsService';\nimport type { GovernoratePricingSetting } from '../adminSettingsService';")
+          s = s.replace("  if (!isOpen) return null;\n\n  const [activeTab, setActiveTab] = useState<'orders' | 'customers' | 'products' | 'trends'>('orders');", "  const [activeTab, setActiveTab] = useState<'orders' | 'customers' | 'products' | 'trends' | 'pricing'>('orders');")
+          s = s.replace("  const [isLoadingUsers, setIsLoadingUsers] = useState(false);", "  const [isLoadingUsers, setIsLoadingUsers] = useState(false);\n  const [pricingSettings, setPricingSettings] = useState<GovernoratePricingSetting[]>([]);\n\n  if (!isOpen) return null;")
+          s = s.replace("  useEffect(() => {\n    if (activeTab === 'customers') {\n      loadUsers();\n    }\n  }, [activeTab]);", "  useEffect(() => {\n    if (activeTab === 'customers') loadUsers();\n  }, [activeTab]);\n\n  useEffect(() => {\n    if (activeTab !== 'pricing') return;\n    return subscribeToPricingSettings(setPricingSettings);\n  }, [activeTab]);")
+          tab_marker = "          <button\n            onClick={() => setActiveTab('trends')}"
+          pricing_button = "          <button\n            onClick={() => setActiveTab('pricing')}\n            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${\n              activeTab === 'pricing' ? 'bg-purple-600 text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-200/80'\n            }`}\n          >\n            <Settings2 className=\"w-4 h-4\" />\n            <span>التسعير والإعدادات</span>\n          </button>\n\n"
+          s = s.replace(tab_marker, pricing_button + tab_marker)
+          s = s.replace("<Trash2, Edit2, Plus, Phone }", "<Trash2, Edit2, Plus, Phone, Settings2 }") if False else s
+          s = s.replace("import { X, ShieldCheck, Users, Package, ShoppingBag, Flame, RefreshCw, CheckCircle, Trash2, Edit2, Plus, Phone } from 'lucide-react';", "import { X, ShieldCheck, Users, Package, ShoppingBag, Flame, RefreshCw, CheckCircle, Trash2, Edit2, Plus, Phone, Settings2 } from 'lucide-react';")
+          render_marker = "          {/* TRENDS TAB */}"
+          pricing_render = "          {activeTab === 'pricing' && (\n            <AdminPricingSettings\n              settings={pricingSettings}\n              onRefresh={() => getPricingSettings().then(setPricingSettings).catch((error) => { console.error(error); onShowToast('تعذر تحميل إعدادات التسعير', 'error'); })}\n              onSaved={() => getPricingSettings().then(setPricingSettings).catch(() => undefined)}\n              onShowToast={onShowToast}\n            />\n          )}\n\n"
+          s = s.replace(render_marker, pricing_render + render_marker)
+          admin.write_text(s, encoding='utf-8')
+
+          rules = Path('firestore.rules')
+          r = rules.read_text()
+          insert = """\n    match /pricing_settings/{governorate} {\n      allow read: if isAdmin();\n      allow write: if isAdmin();\n    }\n\n    match /app_settings/{settingId} {\n      allow read: if isAdmin();\n      allow write: if isAdmin();\n    }\n"""
+          if 'match /pricing_settings/' not in r:
+              r = r.replace("    match /test/{id} {", insert + "\n    match /test/{id} {")
+          rules.write_text(r, encoding='utf-8')
+
+          vite = Path('vite.config.ts')
+          v = vite.read_text()
+          vite.write_text(v, encoding='utf-8')
+
+          env = Path('.env.example')
+          if not env.exists():
+              env.write_text('VITE_API_BASE_URL=https://your-api-domain.example.com\n', encoding='utf-8')
+
+          gitignore = Path('.gitignore')
+          if gitignore.exists():
+              gi = gitignore.read_text()
+          else:
+              gi = ''
+          additions = '\n.env\n.env.*\nserver/.env\nserver/node_modules/\nserver/dist/\n'
+          if '.env.*' not in gi:
+              gitignore.write_text(gi.rstrip() + additions, encoding='utf-8')
+          PY
+          bun install && bun run typecheck && bun run build
+          cd server && npm install && npm run typecheck && npm run build
+      - name: Commit and remove patch workflow
+        run: |
+          rm -f .github/workflows/patch-settings-server.yml
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/auth.ts src/components/AdminModal.tsx firestore.rules .env.example .gitignore .github/workflows/patch-settings-server.yml
+          git add server
+          git commit -m "Add admin pricing settings and self hosted OTP" || exit 0
+          git push
