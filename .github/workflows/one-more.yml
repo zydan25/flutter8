@@ -1,0 +1,65 @@
+name: Complete Repair
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Apply repair and normalize models
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re, textwrap
+          repair=Path('.github/workflows/repair.yml')
+          if not repair.exists(): raise SystemExit('repair.yml missing')
+          w=repair.read_text(encoding='utf-8')
+          a=w.index("python3 <<'PY'\n")+len("python3 <<'PY'\n")
+          b=w.index("\n          PY",a)
+          exec(compile(textwrap.dedent(w[a:b]),'repair.py','exec'),{})
+
+          p=Path('src/types.ts'); s=p.read_text(encoding='utf-8')
+          def add_field(interface_name, field):
+              nonlocal_state[0] = nonlocal_state[0]
+          # Product optional metadata present in source data.
+          if 'isTrend?: boolean;' not in s:
+              s=re.sub(r'(export interface Product \{)', r'\1\n  isTrend?: boolean;\n  colorCount?: number;', s, count=1)
+          # Banner gradient/theme metadata present in source data.
+          if 'bgGradient?: string;' not in s:
+              s=re.sub(r'(export interface Banner \{)', r'\1\n  bgGradient?: string;', s, count=1)
+          if 'themeColor?: string;' not in s:
+              s=re.sub(r'(export interface Banner \{)', r'\1\n  themeColor?: string;', s, count=1)
+          # De-duplicate ownership field introduced by prior pass.
+          s=re.sub(r'(  customerId: string;\n){2,}', '  customerId: string;\n', s)
+          p.write_text(s,encoding='utf-8')
+
+          # Remove all temporary mutation workflows; this final workflow is one-shot too.
+          for wf in ['.github/workflows/repair.yml','.github/workflows/finish-once.yml','.github/workflows/finalize.yml','.github/workflows/one-more.yml']:
+              q=Path(wf)
+              if q.exists(): q.unlink()
+          PY
+      - name: Install dependencies
+        run: bun install
+      - name: Typecheck
+        run: bun run typecheck
+      - name: Build web
+        run: bun run build
+      - name: Build Firebase Functions
+        working-directory: functions
+        run: npm install && npm run build
+      - name: Commit validated project
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "repair: complete source hardening and validation" || true
+          git push origin main
