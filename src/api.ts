@@ -80,6 +80,33 @@ export async function verifyOtpApi(payload: {
   return result;
 }
 
+export async function getMyProfileApi(): Promise<ApiUser> {
+  const result = await apiFetch<{ success: boolean; user: ApiUser }>('/takhfid/api/v2/me/profile');
+  return result.user;
+}
+
+export async function updateMyProfileApi(payload: Partial<Omit<ApiUser, 'uid' | 'phone' | 'role' | 'isAdmin' | 'createdAt' | 'lastLoginAt' | 'updatedAt'>>): Promise<ApiUser> {
+  const result = await apiFetch<{ success: boolean; user: ApiUser }>('/takhfid/api/v2/me/profile', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+  return result.user;
+}
+
+export async function getFlaskCustomers(): Promise<ApiUser[]> {
+  const result = await apiFetch<{ success: boolean; customers: ApiUser[] }>('/takhfid/api/v2/admin/customers');
+  return result.customers || [];
+}
+
+export async function mirrorCustomersToFlask(customers: unknown[]): Promise<void> {
+  if (!getAccessToken()) return;
+  await apiFetch('/takhfid/api/v2/admin/customers/bulk', { method: 'POST', body: JSON.stringify({ customers }) });
+}
+
+export async function deleteFlaskCustomer(uid: string): Promise<void> {
+  await apiFetch(`/takhfid/api/v2/admin/customers/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+}
+
 export async function mirrorProductsToFlask(products: unknown[]): Promise<void> {
   if (!getAccessToken()) return;
   await apiFetch('/takhfid/api/v2/products/bulk', { method: 'POST', body: JSON.stringify({ products }) });
