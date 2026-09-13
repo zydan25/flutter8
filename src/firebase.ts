@@ -46,7 +46,15 @@ export async function deleteUserFromFirestore(uid: string): Promise<void> {
 }
 
 export async function fetchAllUsersFromFirestore(): Promise<User[]> {
-  return (await getFlaskCustomers()) as User[];
+  const flaskUsers = await getFlaskCustomers();
+  if (flaskUsers.length > 0) return flaskUsers as User[];
+
+  // One-time compatibility migration: only runs when Flask has no customers yet.
+  const snapshot = await getDocs(collection(db, 'users'));
+  if (snapshot.empty) return [];
+  const users = snapshot.docs.map((d) => toUser(d.data(), d.id));
+  await mirrorCustomersToFlask(users);
+  return users;
 }
 
 export async function migrateLegacyUsersToFlask(): Promise<void> {
