@@ -1,4 +1,3 @@
-import { signInWithCustomToken } from 'firebase/auth';
 import { auth } from './firebase';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://whats.alattab.site').replace(/\/$/, '');
@@ -58,6 +57,7 @@ export async function verifyWhatsAppOtp(payload: {
   governorate: string;
 }): Promise<{ data: VerifyOtpResponse }> {
   const data = await postJson<VerifyOtpResponse>('/takhfid/api/auth/verify-otp', payload);
-  await signInWithCustomToken(auth, data.customToken);
   return { data };
 }
+
+void auth;
