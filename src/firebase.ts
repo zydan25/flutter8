@@ -4,6 +4,7 @@ import { getStorage } from 'firebase/storage';
 import { collection, deleteDoc, doc, getDoc, getDocs, getFirestore, onSnapshot, query, setDoc, updateDoc, where, writeBatch, orderBy, limit } from 'firebase/firestore';
 import type { Unsubscribe } from 'firebase/firestore';
 import type { Order, Product, User, ChatMessage } from './types';
+import { deleteFlaskCustomer, fetchCurrentUser, getFlaskCustomers, mirrorCustomersToFlask, updateMyProfileApi } from './api';
 
 export const firebaseConfig = {
   apiKey: "AIzaSyAKilRP9uw5l9ZPIw54zMXuLcKU-9yzxOI",
@@ -24,12 +25,39 @@ const toUser = (data: Record<string, unknown>, id: string): User => ({ ...(data 
 const toOrder = (data: Record<string, unknown>, id: string): Order => ({ ...(data as unknown as Order), id: String(data.id ?? id) });
 const toMessage = (data: Record<string, unknown>, id: string): ChatMessage => ({ ...(data as unknown as ChatMessage), id: String(data.id ?? id) });
 
-export async function fetchUserProfile(uid: string): Promise<User | null> { const snapshot = await getDoc(doc(db, 'users', uid)); return snapshot.exists() ? toUser(snapshot.data(), snapshot.id) : null; }
-export async function syncUserToFirestore(user: User): Promise<void> { await setDoc(doc(db, 'users', user.uid), { ...user, updatedAt: new Date().toISOString() } as Record<string, unknown>, { merge: true }); }
-export async function deleteUserFromFirestore(uid: string): Promise<void> { await deleteDoc(doc(db, 'users', uid)); }
+// Compatibility names retained while the app migrates away from Firebase. User/profile data is now served by Flask.
+export async function fetchUserProfile(uid: string): Promise<User | null> {
+  const current = await fetchCurrentUser();
+  return current && current.uid === uid ? current as User : null;
+}
+
+export async function syncUserToFirestore(user: User): Promise<void> {
+  await updateMyProfileApi({
+    firstName: user.firstName,
+    secondName: user.secondName,
+    thirdName: user.thirdName,
+    lastName: user.lastName,
+    governorate: user.governorate,
+  });
+}
+
+export async function deleteUserFromFirestore(uid: string): Promise<void> {
+  await deleteFlaskCustomer(uid);
+}
+
+export async function fetchAllUsersFromFirestore(): Promise<User[]> {
+  return (await getFlaskCustomers()) as User[];
+}
+
+export async function migrateLegacyUsersToFlask(): Promise<void> {
+  const snapshot = await getDocs(collection(db, 'users'));
+  if (snapshot.empty) return;
+  const users = snapshot.docs.map((d) => toUser(d.data(), d.id));
+  await mirrorCustomersToFlask(users);
+}
+
 export async function updateOrderStatusInFirestore(orderId: string, status: Order['status'], isPaid?: boolean): Promise<void> { const payload: { status: Order['status']; updatedAt: string; isPaid?: boolean; paymentConfirmedAt?: string } = { status, updatedAt: new Date().toISOString() }; if (typeof isPaid === 'boolean') payload.isPaid = isPaid; if (isPaid) payload.paymentConfirmedAt = new Date().toISOString(); await updateDoc(doc(db, 'orders', orderId), payload); }
 export async function markPaymentSubmitted(orderId: string, proofUrl: string, note?: string): Promise<void> { await updateDoc(doc(db, 'orders', orderId), { status: 'payment_submitted', paymentProofUrl: proofUrl, paymentNote: note || '', updatedAt: new Date().toISOString() }); }
-export async function fetchAllUsersFromFirestore(): Promise<User[]> { const snapshot = await getDocs(collection(db, 'users')); return snapshot.docs.map((d) => toUser(d.data(), d.id)); }
 export async function fetchAllOrdersFromFirestore(): Promise<Order[]> { const snapshot = await getDocs(collection(db, 'orders')); return snapshot.docs.map((d) => toOrder(d.data(), d.id)); }
 export function subscribeToOrdersForUser(uid: string, onChange: (orders: Order[]) => void): Unsubscribe { const q = query(collection(db, 'orders'), where('customerId', '==', uid)); return onSnapshot(q, (snapshot) => onChange(snapshot.docs.map((d) => toOrder(d.data(), d.id)).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))), (error) => { console.error('User orders subscription failed:', error); onChange([]); }); }
 export function subscribeToAllOrders(onChange: (orders: Order[]) => void): Unsubscribe { return onSnapshot(collection(db, 'orders'), (snapshot) => onChange(snapshot.docs.map((d) => toOrder(d.data(), d.id)).sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)))), (error) => { console.error('Admin orders subscription failed:', error); onChange([]); }); }
