@@ -20,17 +20,16 @@ const GOVERNORATE_RATES: Record<string, { region: 'north'|'south'; sarToYerRate:
   صنعاء:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:0,deliveryFee:0}, 'أمانة العاصمة':{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:0,deliveryFee:0}, تعز:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:3,deliveryFee:0}, إب:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:2,deliveryFee:0}, الحديدة:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:2,deliveryFee:0}, ذمار:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:2,deliveryFee:0}, مأرب:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:4,deliveryFee:0}, صعدة:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:3,deliveryFee:0}, حجة:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:3,deliveryFee:0}, عمران:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:2,deliveryFee:0}, البيضاء:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:3,deliveryFee:0}, الجوف:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:4,deliveryFee:0}, المحويت:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:3,deliveryFee:0}, ريمة:{region:'north',sarToYerRate:140,usdToYerRate:535,markupValue:3,deliveryFee:0},
 };
 const getRate = (governorate: string) => GOVERNORATE_RATES[governorate] || GOVERNORATE_RATES['أمانة العاصمة'];
-
 function normalizePhone(value: string): string { let digits = String(value || '').replace(/\D/g, ''); if (digits.startsWith('00')) digits = digits.slice(2); if (digits.startsWith('0')) digits = `967${digits.slice(1)}`; if (digits.length === 9 && digits.startsWith('7')) digits = `967${digits}`; return digits; }
 function otpHash(phone: string, otp: string, secret: string): string { return createHash('sha256').update(`${phone}:${otp}:${secret}`).digest('hex'); }
 function phoneDocId(phone: string): string { return createHash('sha256').update(phone).digest('hex').slice(0, 32); }
+function convertBasePrice(price: number, currency: 'YER'|'SAR', rate: { sarToYerRate: number; markupValue: number }): number { const marked = (Number(price) || 0) * (1 + Math.max(0, rate.markupValue) / 100); return currency === 'SAR' ? (marked >= 1000 ? Math.round(marked / rate.sarToYerRate) : Math.round(marked)) : (marked < 1000 ? Math.round(marked * rate.sarToYerRate) : Math.round(marked)); }
 
 export const sendWhatsAppOtp = onCall({ secrets: [WHATSAPP_SEND_URL, OTP_HASH_SECRET] }, async (request) => {
   const phone = normalizePhone(request.data?.phoneNumber); if (!/^\d{8,15}$/.test(phone)) throw new HttpsError('invalid-argument', 'رقم الهاتف غير صالح');
   const ref = db.collection('otp_requests').doc(phoneDocId(phone)); const now = Date.now(); const old = await ref.get();
   if (old.exists && now - Number(old.data()?.sentAtMs || 0) < 60_000) throw new HttpsError('resource-exhausted', 'انتظر قبل إعادة الإرسال');
-  const otp = String(randomInt(100000, 1000000));
-  await ref.set({ phone, hash: otpHash(phone, otp, OTP_HASH_SECRET.value()), sentAtMs: now, expiresAtMs: now + 300_000, attempts: 0 });
+  const otp = String(randomInt(100000, 1000000)); await ref.set({ phone, hash: otpHash(phone, otp, OTP_HASH_SECRET.value()), sentAtMs: now, expiresAtMs: now + 300_000, attempts: 0 });
   const form = new FormData(); form.append('phoneNumber', phone); form.append('message', `رمز الدخول إلى التخفيض الصح: ${otp}\nصالح لمدة 5 دقائق. لا تشاركه مع أي شخص.`);
   try { const response = await fetch(WHATSAPP_SEND_URL.value(), { method: 'POST', body: form }); if (!response.ok) { await ref.delete(); throw new HttpsError('unavailable', 'تعذر إرسال رمز التحقق عبر واتساب'); } }
   catch (error) { await ref.delete().catch(() => undefined); if (error instanceof HttpsError) throw error; logger.error('WhatsApp OTP gateway failed', error); throw new HttpsError('unavailable', 'خدمة واتساب غير متاحة حاليًا'); }
@@ -58,20 +57,16 @@ export const createOrder = onCall(async (request) => {
   if (!request.auth?.uid) throw new HttpsError('unauthenticated', 'يجب تسجيل الدخول قبل إنشاء الطلب');
   const items = Array.isArray(request.data?.items) ? request.data.items : []; if (!items.length || items.length > 100) throw new HttpsError('invalid-argument', 'السلة غير صالحة');
   const snapshots = await Promise.all(items.map((item: any) => db.collection('products').doc(String(item.productId)).get()));
-  const orderItems: OrderItemPayload[] = items.map((item: any, index: number) => { const snapshot = snapshots[index]; if (!snapshot.exists) throw new HttpsError('not-found', 'أحد المنتجات غير موجود'); const product = snapshot.data() || {}; const quantity = Math.max(1, Math.min(99, Number(item.quantity) || 1)); return { productId: snapshot.id, productName: String(product.name || 'منتج'), quantity, price: Number(product.price ?? product.discountPrice ?? product.originalPrice ?? 0), image: String(product.image || ''), color: item.color ? String(item.color) : undefined, size: item.size ? String(item.size) : undefined }; });
+  const rawItems: OrderItemPayload[] = items.map((item: any, index: number) => { const snapshot = snapshots[index]; if (!snapshot.exists) throw new HttpsError('not-found', 'أحد المنتجات غير موجود'); const product = snapshot.data() || {}; const quantity = Math.max(1, Math.min(99, Number(item.quantity) || 1)); return { productId: snapshot.id, productName: String(product.name || 'منتج'), quantity, price: Number(product.price ?? product.discountPrice ?? product.originalPrice ?? 0), image: String(product.image || ''), color: item.color ? String(item.color) : undefined, size: item.size ? String(item.size) : undefined }; });
   const profile = (await db.collection('users').doc(request.auth.uid).get()).data() || {};
-  const governorate = String(request.data?.governorate || profile.governorate || 'أمانة العاصمة');
-  const rate = getRate(governorate);
-  const markupMultiplier = 1 + Math.max(0, rate.markupValue) / 100;
-  const baseSubtotal = orderItems.reduce((sum: number, item: OrderItemPayload) => sum + item.price * item.quantity, 0);
-  const subtotal = Math.round(baseSubtotal * markupMultiplier);
-  const currency = request.data?.currency === 'SAR' ? 'SAR' : 'YER';
+  const governorate = String(request.data?.governorate || profile.governorate || 'أمانة العاصمة'); const rate = getRate(governorate); const currency = request.data?.currency === 'SAR' ? 'SAR' : 'YER';
+  const orderItems: OrderItemPayload[] = rawItems.map((item) => ({ ...item, price: convertBasePrice(item.price, currency, rate) }));
+  const subtotal = orderItems.reduce((sum: number, item: OrderItemPayload) => sum + item.price * item.quantity, 0);
   const shippingFee = currency === 'SAR' ? Math.round(rate.deliveryFee / rate.sarToYerRate) : rate.deliveryFee;
   const paymentMethod = ['cash_on_delivery', 'kuraimi', 'jawali', 'one_cash'].includes(request.data?.paymentMethod) ? request.data.paymentMethod : 'cash_on_delivery';
-  const status = paymentMethod === 'cash_on_delivery' ? 'preparing' : 'awaiting_payment';
-  const orderRef = db.collection('orders').doc();
-  const order = { id: orderRef.id, customerId: request.auth.uid, orderNumber: `TK-${randomInt(100000, 1000000)}`, customerName: String(request.data?.customerName || profile.firstName || 'عميل').trim(), customerPhone: String(profile.phone || ''), governorate, address: String(request.data?.address || '').trim(), items: orderItems.map((item) => ({ ...item, price: item.price }),), subtotal, shippingFee, discount: 0, total: subtotal + shippingFee, currency, status, paymentMethod, createdAt: new Date().toISOString(), isPaid: false, pricingRegion: rate.region, pricingMarkupPercent: rate.markupValue, exchangeRateSarToYer: rate.sarToYerRate };
+  const status = paymentMethod === 'cash_on_delivery' ? 'preparing' : 'awaiting_payment'; const orderRef = db.collection('orders').doc();
+  const order = { id: orderRef.id, customerId: request.auth.uid, orderNumber: `TK-${randomInt(100000, 1000000)}`, customerName: String(request.data?.customerName || profile.firstName || 'عميل').trim(), customerPhone: String(profile.phone || ''), governorate, address: String(request.data?.address || '').trim(), items: orderItems, subtotal, shippingFee, discount: 0, total: subtotal + shippingFee, currency, status, paymentMethod, createdAt: new Date().toISOString(), isPaid: false, pricingRegion: rate.region, pricingMarkupPercent: rate.markupValue, exchangeRateSarToYer: rate.sarToYerRate };
   await orderRef.set(order); await db.collection('chats').doc(orderRef.id).set({ id: orderRef.id, orderId: orderRef.id, customerId: request.auth.uid, orderNumber: order.orderNumber, total: order.total, currency, paymentMethod, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, { merge: true });
-  await db.collection('chats').doc(orderRef.id).collection('messages').add({ id: randomInt(100000, 1000000).toString(), orderId: orderRef.id, senderId: request.auth.uid, senderRole: 'customer', type: 'order_snapshot', text: `تم إنشاء الطلب ${order.orderNumber} والإجمالي ${order.total} ${currency}.`, orderSnapshot: order, createdAt: new Date().toISOString() });
+  await db.collection('chats').doc(orderRef.id).collection('messages').add({ orderId: orderRef.id, senderId: request.auth.uid, senderRole: 'customer', type: 'order_snapshot', text: `تم إنشاء الطلب ${order.orderNumber} والإجمالي ${order.total} ${currency}.`, orderSnapshot: order, createdAt: new Date().toISOString() });
   return { success: true, order };
 });
