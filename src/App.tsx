@@ -19,6 +19,7 @@ import { OrdersModal } from './components/OrdersModal';
 import { SearchModal } from './components/SearchModal';
 import { AuthModal } from './components/AuthModal';
 import { CustomerChatModal } from './components/CustomerChatModal';
+import { OrderChatModal } from './components/OrderChatModal';
 import { Toast } from './components/Toast';
 import { Flame, Sparkles, MessageCircle, ChevronLeft } from 'lucide-react';
 
@@ -51,6 +52,7 @@ export const App: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isOrdersOpen, setIsOrdersOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [selectedChatOrder, setSelectedChatOrder] = useState<Order | null>(null);
   const [toast, setToast] = useState<{ message: string; type?: 'success' | 'info' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
@@ -93,6 +95,12 @@ export const App: React.FC = () => {
 
   useEffect(() => { localStorage.setItem('altakhfid_cart', JSON.stringify(cartItems)); }, [cartItems]);
   useEffect(() => { localStorage.setItem('altakhfid_wishlist', JSON.stringify(wishlistIds)); }, [wishlistIds]);
+
+  useEffect(() => {
+    const handler = (event: Event) => { const order = (event as CustomEvent<Order>).detail; if (order) setSelectedChatOrder(order); };
+    window.addEventListener('openOrderChat', handler);
+    return () => window.removeEventListener('openOrderChat', handler);
+  }, []);
 
   useEffect(() => {
     const openTrendTag = (tag: string) => {
@@ -165,9 +173,10 @@ export const App: React.FC = () => {
       <CategoryModal isOpen={isCategoryModalOpen} categories={categories} selectedCategoryId={selectedCategoryId} onClose={() => setIsCategoryModalOpen(false)} onSelectCategory={(id) => { setSelectedCategoryId(id); setActiveTab('home'); }}/>
       <SearchModal isOpen={isSearchOpen} products={products} currency={currency} onClose={() => setIsSearchOpen(false)} onSelectProduct={setSelectedProduct}/>
       <AdminModal isOpen={isAdminOpen} orders={orders} products={products} campaigns={campaigns} onClose={() => setIsAdminOpen(false)} onUpdateOrderStatus={(orderId, status, isPaid) => { setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, isPaid: isPaid ?? order.isPaid } : order)); updateOrderStatusInFirestore(orderId, status, isPaid).catch((error) => { console.error(error); showToast('فشل تحديث الطلب في قاعدة البيانات', 'error'); }); }} onSaveProduct={(product) => { setProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]); saveProductToFirestore(product).then(() => showToast('تم حفظ المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حفظ المنتج', 'error'); }); }} onDeleteProduct={(productId) => { setProducts((current) => current.filter((item) => item.id !== productId)); deleteProductFromFirestore(productId).then(() => showToast('تم حذف المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حذف المنتج', 'error'); }); }} onUpdateCampaigns={setCampaigns} onShowToast={showToast}/>
-      <OrdersModal isOpen={isOrdersOpen} orders={orders} currency={currency} onClose={() => setIsOrdersOpen(false)} onOpenSupport={() => { setIsOrdersOpen(false); setIsSupportOpen(true); }}/>
+      <OrdersModal isOpen={isOrdersOpen} orders={orders} currency={currency} onClose={() => setIsOrdersOpen(false)} onOpenSupport={() => { setIsOrdersOpen(false); setIsSupportOpen(true); }} onOpenOrderChat={(order) => setSelectedChatOrder(order)}/>
       <AuthModal isOpen={isAuthOpen} user={user} onClose={() => setIsAuthOpen(false)} onLogin={setUser} onLogout={handleLogout} onShowToast={showToast}/>
       <CustomerChatModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)}/>
+      <OrderChatModal isOpen={!!selectedChatOrder} order={selectedChatOrder} user={user} onClose={() => setSelectedChatOrder(null)} onOrderChanged={(updated) => setOrders((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item))} onShowToast={showToast}/>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)}/>} 
     </div>
   );
