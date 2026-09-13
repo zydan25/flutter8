@@ -1,24 +1,37 @@
-/**
- * Pricing and currency formatting utility for Altakhfid Alsah
- */
+import { GOVERNORATE_RATES } from '../data/governorates';
+
+export type Currency = 'YER' | 'SAR';
+
+export const getGovernorateRate = (governorate?: string) =>
+  GOVERNORATE_RATES[governorate || 'أمانة العاصمة'] || GOVERNORATE_RATES['أمانة العاصمة'];
+
+export const convertBasePrice = (price: number, currency: Currency, governorate?: string): number => {
+  const rate = getGovernorateRate(governorate);
+  const num = Number(price) || 0;
+  if (currency === 'SAR') return num >= 1000 ? Math.round(num / rate.sarToYerRate) : Math.round(num);
+  return num < 1000 ? Math.round(num * rate.sarToYerRate) : Math.round(num);
+};
+
+export const getDeliveryFee = (governorate?: string): number => {
+  const rate = getGovernorateRate(governorate);
+  return rate.freeDeliveryIncluded ? 0 : 2500;
+};
+
+export const getGovernorateMarkupMultiplier = (governorate?: string): number => {
+  const rate = getGovernorateRate(governorate);
+  return 1 + Math.max(0, Number(rate.markupValue) || 0) / 100;
+};
 
 export const formatCurrencyPrice = (
   price?: number | null,
-  currency: 'YER' | 'SAR' = 'YER',
-  rate: number = 140
+  currency: Currency = 'YER',
+  governorate?: string,
 ): string => {
-  if (price === undefined || price === null || isNaN(Number(price))) {
+  if (price === undefined || price === null || Number.isNaN(Number(price))) {
     return currency === 'SAR' ? '0 ر.س' : '0 ر.ي';
   }
-  const num = Number(price);
-  if (currency === 'SAR') {
-    const sarVal = num > 1000 ? Math.round(num / 140) : num;
-    const formatted = sarVal % 1 === 0 ? sarVal.toString() : sarVal.toFixed(2);
-    return `${formatted} ر.س`;
-  }
-  // YER: if base price is in SAR (< 1000), multiply by exchange rate (default 140)
-  const yerVal = num < 1000 ? Math.round(num * rate) : Math.round(num);
-  return `${yerVal.toLocaleString('ar-YE')} ر.ي`;
+  const converted = convertBasePrice(Number(price), currency, governorate);
+  return `${converted.toLocaleString('ar-YE')} ${currency === 'SAR' ? 'ر.س' : 'ر.ي'}`;
 };
 
 export const safeFormatNumber = (
@@ -26,8 +39,6 @@ export const safeFormatNumber = (
   defaultStr: string = '0',
   locale: string = 'ar-YE'
 ): string => {
-  if (val === undefined || val === null || isNaN(Number(val))) {
-    return defaultStr;
-  }
+  if (val === undefined || val === null || Number.isNaN(Number(val))) return defaultStr;
   return Number(val).toLocaleString(locale);
 };
