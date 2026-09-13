@@ -144,6 +144,7 @@ export interface OrderItem {
 
 export interface Order {
   id: string;
+  customerId: string;
   orderNumber: string;
   customerName: string;
   customerPhone: string;
@@ -175,6 +176,7 @@ export interface User {
   isAdmin?: boolean;
   createdAt?: string;
   lastLoginAt?: string;
+  updatedAt?: string;
 }
 
 export interface PricingSettings {
