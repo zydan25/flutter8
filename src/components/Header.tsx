@@ -1,6 +1,7 @@
 import React from 'react';
 import { Search, Heart, ShoppingBag, ShieldCheck, User } from 'lucide-react';
 import type { User as UserType } from '../types';
+import { API_BASE_URL } from '../api';
 
 interface HeaderProps {
   cartCount: number;
@@ -27,7 +28,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleCurrency,
 }) => {
   const openFlaskAdmin = () => {
-    window.open('/takhfid/admin/', '_blank', 'noopener,noreferrer');
+    window.open(`${API_BASE_URL}/takhfid/admin/`, '_blank', 'noopener,noreferrer');
   };
 
   return (
