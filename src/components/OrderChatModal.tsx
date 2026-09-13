@@ -32,15 +32,6 @@ export const OrderChatModal: React.FC<Props> = ({ isOpen, order, user, onClose, 
 
   if (!isOpen || !order) return null;
 
-  const refreshOrder = async () => {
-    try {
-      const result = await fetch(`/takhfid/api/v2/orders/${encodeURIComponent(order.id)}`);
-      if (!result.ok) return;
-      const data = await result.json() as { success?: boolean; order?: Order };
-      if (data.order) onOrderChanged?.(data.order);
-    } catch (error) { console.error('Order refresh failed:', error); }
-  };
-
   const sendText = async () => {
     const value = text.trim();
     if (!value || !user) return;
@@ -87,18 +78,9 @@ export const OrderChatModal: React.FC<Props> = ({ isOpen, order, user, onClose, 
 
   return <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-3" onClick={onClose}>
     <div className="bg-white w-full max-w-lg h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
-      <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
-        <div><div className="font-black text-sm">محادثة الطلب {order.orderNumber}</div><div className="text-[11px] text-slate-300 mt-0.5">{statusLabel(order.status)} · {formatCurrencyPrice(order.total, order.currency)}</div></div>
-        <button onClick={onClose}><X className="w-5 h-5" /></button>
-      </div>
-      <div className="p-3 bg-slate-50 border-b space-y-2">
-        <div className="text-xs font-bold">تفاصيل الطلب</div>
-        <div className="grid grid-cols-2 gap-2 text-[10px]">{order.items.map((item, i) => <div key={i} className="bg-white rounded-xl p-2 border flex gap-2"><img src={item.image} className="w-12 h-12 rounded-lg object-cover"/><div className="min-w-0"><div className="font-bold truncate">{item.productName}</div><div className="text-slate-500">الكمية: {item.quantity}</div>{item.color && <div className="text-slate-500">اللون: {item.color}</div>}{item.size && <div className="text-slate-500">المقاس: {item.size}</div>}</div></div>)}</div>
-        <div className="flex justify-between text-xs font-black"><span>طريقة الدفع: {order.paymentMethod}</span><span>{formatCurrencyPrice(order.total, order.currency)}</span></div>
-      </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-white">
-        {messages.length === 0 ? <div className="h-full flex items-center justify-center text-xs text-slate-400">ابدأ المحادثة حول هذا الطلب</div> : messages.map((m) => <div key={m.id} className={`flex ${m.senderId === user?.uid ? 'justify-start' : 'justify-end'}`}><div className={`max-w-[85%] rounded-2xl p-2.5 text-xs ${m.senderId === user?.uid ? 'bg-purple-50 text-slate-800' : 'bg-slate-100 text-slate-800'}`}>{m.type === 'payment_proof' && m.imageUrl && <img src={m.imageUrl} className="w-full max-h-64 object-contain rounded-xl mb-2 bg-white"/>}{m.text && <div>{m.text}</div>}<div className="text-[9px] text-slate-400 mt-1">{new Date(m.createdAt).toLocaleString('ar-YE')}</div></div></div>)}
-      </div>
+      <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between"><div><div className="font-black text-sm">محادثة الطلب {order.orderNumber}</div><div className="text-[11px] text-slate-300 mt-0.5">{statusLabel(order.status)} · {formatCurrencyPrice(order.total, order.currency)}</div></div><button onClick={onClose}><X className="w-5 h-5" /></button></div>
+      <div className="p-3 bg-slate-50 border-b space-y-2"><div className="text-xs font-bold">تفاصيل الطلب</div><div className="grid grid-cols-2 gap-2 text-[10px]">{order.items.map((item, i) => <div key={i} className="bg-white rounded-xl p-2 border flex gap-2"><img src={item.image} className="w-12 h-12 rounded-lg object-cover"/><div className="min-w-0"><div className="font-bold truncate">{item.productName}</div><div className="text-slate-500">الكمية: {item.quantity}</div>{item.color && <div className="text-slate-500">اللون: {item.color}</div>}{item.size && <div className="text-slate-500">المقاس: {item.size}</div>}</div></div>)}</div><div className="flex justify-between text-xs font-black"><span>طريقة الدفع: {order.paymentMethod}</span><span>{formatCurrencyPrice(order.total, order.currency)}</span></div></div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-white">{messages.length === 0 ? <div className="h-full flex items-center justify-center text-xs text-slate-400">ابدأ المحادثة حول هذا الطلب</div> : messages.map((m) => <div key={m.id} className={`flex ${m.senderId === user?.uid ? 'justify-start' : 'justify-end'}`}><div className={`max-w-[85%] rounded-2xl p-2.5 text-xs ${m.senderId === user?.uid ? 'bg-purple-50 text-slate-800' : 'bg-slate-100 text-slate-800'}`}>{m.type === 'payment_proof' && m.imageUrl && <img src={m.imageUrl} className="w-full max-h-64 object-contain rounded-xl mb-2 bg-white"/>}{m.text && <div>{m.text}</div>}<div className="text-[9px] text-slate-400 mt-1">{new Date(m.createdAt).toLocaleString('ar-YE')}</div></div></div>)}</div>
       {user?.isAdmin && <div className="p-2 bg-amber-50 border-t border-amber-100 flex gap-2 flex-wrap"><button disabled={busy} onClick={() => adminSet('preparing', true)} className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3"/>تأكيد الدفع</button><button disabled={busy} onClick={() => adminSet('in_shipping', true)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-[10px] font-bold flex items-center gap-1"><Truck className="w-3 h-3"/>بدء الشحن</button><button disabled={busy} onClick={() => adminSet('delivered', true)} className="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-[10px] font-bold flex items-center gap-1"><PackageCheck className="w-3 h-3"/>تم التسليم</button></div>}
       {order.status !== 'delivered' && order.status !== 'cancelled' && <div className="p-3 border-t bg-slate-50"><div className="flex items-center gap-2"><input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadProof(f); e.currentTarget.value = ''; }}/><button type="button" onClick={() => fileRef.current?.click()} disabled={busy || user?.isAdmin} className="w-10 h-10 rounded-xl bg-white border flex items-center justify-center disabled:opacity-40" title="إرسال إشعار التحويل"><Paperclip className="w-4 h-4"/></button><input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void sendText(); }} placeholder={user?.isAdmin ? 'اكتب رد المتجر...' : 'اكتب رسالتك...'} className="flex-1 p-2.5 rounded-xl border text-xs"/><button onClick={() => void sendText()} disabled={busy || !text.trim()} className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center disabled:opacity-40"><Send className="w-4 h-4"/></button></div><div className="text-[9px] text-slate-400 mt-1 flex items-center gap-1"><ImageIcon className="w-3 h-3"/> للعميل: زر المشبك لرفع صورة إشعار التحويل</div></div>}
     </div>
