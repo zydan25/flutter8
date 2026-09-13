@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, User, Phone, MapPin, ShieldCheck, ArrowRight, LogOut, RefreshCw } from 'lucide-react';
-import { signInWithCustomToken } from 'firebase/auth';
 import type { User as UserType } from '../types';
 import { ALL_GOVERNORATES } from '../data/governorates';
-import { auth } from '../firebase';
 import { sendWhatsAppOtp, verifyWhatsAppOtp } from '../auth';
 
 interface AuthModalProps {
@@ -93,10 +91,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, user, onClose, onL
         lastName: lastName.trim() || undefined,
         governorate,
       });
-      await signInWithCustomToken(auth, result.data.customToken);
       onLogin(result.data.user as UserType);
       onClose();
-      onShowToast(result.data.user.isAdmin ? 'تم تسجيل الدخول إلى الإدارة بنجاح 👑' : `أهلًا بك يا ${result.data.user.firstName}!`, 'success');
+      onShowToast(result.data.user.isAdmin ? 'تم تسجيل الدخول إلى الإدارة بنجاح 👑' : `أهلًا بك يا ${result.data.user.firstName || firstName}!`, 'success');
     } catch (error: any) {
       console.error('OTP verification failed:', error);
       onShowToast(error?.message || 'رمز التحقق غير صحيح أو منتهي الصلاحية', 'error');
