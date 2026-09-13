@@ -5,7 +5,7 @@ import type { Unsubscribe } from 'firebase/firestore';
 import type { Order, Product, User } from './types';
 
 export const firebaseConfig = {
-  apiKey: "AIzaSyAKilRP9uw5l9ZPI6w4zMXuLcKU-9yzxOI",
+  apiKey: "AIzaSyAKilRP9uw5l9ZPIw54zMXuLcKU-9yzxOI",
   authDomain: "valued-leaf-npthm.firebaseapp.com",
   projectId: "valued-leaf-npthm",
   storageBucket: "valued-leaf-npthm.firebasestorage.app",
