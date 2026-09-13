@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, ShieldCheck, Users, Package, ShoppingBag, Flame, RefreshCw, CheckCircle, Trash2, Phone, ExternalLink } from 'lucide-react';
 import type { Order, Product, TrendCampaign, User } from '../types';
-import { deleteFlaskCustomer, getFlaskCustomers, updateFlaskOrderStatus } from '../api';
+import { API_BASE_URL, deleteFlaskCustomer, getFlaskCustomers, updateFlaskOrderStatus } from '../api';
 import { safeFormatNumber } from '../utils/pricing';
 
 interface AdminModalProps {
@@ -79,7 +79,7 @@ export const AdminModal: React.FC<AdminModalProps> = ({ isOpen, orders, products
             <div><h2 className="font-black text-base sm:text-lg">إدارة المتجر — Flask</h2><p className="text-[11px] text-slate-300">العملاء والطلبات مرتبطة بالخادم مباشرة</p></div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => window.open('/takhfid/admin/', '_blank', 'noopener,noreferrer')} className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold"><ExternalLink className="w-4 h-4"/> لوحة Flask الكاملة</button>
+            <button onClick={() => window.open(`${API_BASE_URL}/takhfid/admin/`, '_blank', 'noopener,noreferrer')} className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-xs font-bold"><ExternalLink className="w-4 h-4"/> لوحة Flask الكاملة</button>
             <button onClick={onClose} className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-slate-800"><X className="w-5 h-5" /></button>
           </div>
         </div>
