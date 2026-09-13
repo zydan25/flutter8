@@ -1,7 +1,5 @@
-import { collection, doc, getDoc, getDocs, onSnapshot, setDoc } from 'firebase/firestore';
-import { db } from './firebase';
+import { apiFetch } from './api';
 import { GOVERNORATE_RATES, ALL_GOVERNORATES } from './data/governorates';
-import type { Unsubscribe } from 'firebase/firestore';
 
 export interface GovernoratePricingSetting {
   governorate: string;
@@ -28,9 +26,6 @@ export interface IntegrationSettings {
   apiBaseUrl: string;
   updatedAt?: string;
 }
-
-const pricingCollection = collection(db, 'pricing_settings');
-const integrationRef = doc(db, 'app_settings', 'integrations');
 
 const fallbackPricing = (governorate: string): GovernoratePricingSetting => {
   const item = GOVERNORATE_RATES[governorate] || GOVERNORATE_RATES['أمانة العاصمة'];
@@ -65,41 +60,68 @@ export const normalizePricing = (data: Partial<GovernoratePricingSetting>, gover
 });
 
 export async function getPricingSettings(): Promise<GovernoratePricingSetting[]> {
-  const snapshot = await getDocs(pricingCollection);
-  const byName = new Map(snapshot.docs.map((item) => [item.id, normalizePricing(item.data() as Partial<GovernoratePricingSetting>, item.id)]));
-  return ALL_GOVERNORATES.map((name) => byName.get(name) || fallbackPricing(name));
+  try {
+    const result = await apiFetch<{ success: boolean; pricing: Record<string, Partial<GovernoratePricingSetting>> }>('/takhfid/admin/api/pricing');
+    return ALL_GOVERNORATES.map((name) => normalizePricing(result.pricing?.[name] || fallbackPricing(name), name));
+  } catch (error) {
+    console.error('Flask pricing settings load failed:', error);
+    return ALL_GOVERNORATES.map(fallbackPricing);
+  }
 }
 
-export function subscribeToPricingSettings(onChange: (settings: GovernoratePricingSetting[]) => void): Unsubscribe {
-  return onSnapshot(pricingCollection, (snapshot) => {
-    const byName = new Map(snapshot.docs.map((item) => [item.id, normalizePricing(item.data() as Partial<GovernoratePricingSetting>, item.id)]));
-    onChange(ALL_GOVERNORATES.map((name) => byName.get(name) || fallbackPricing(name)));
-  }, (error) => {
-    console.error('Pricing settings subscription failed:', error);
-    onChange(ALL_GOVERNORATES.map(fallbackPricing));
-  });
+export function subscribeToPricingSettings(onChange: (settings: GovernoratePricingSetting[]) => void): () => void {
+  let active = true;
+  const load = async () => {
+    const settings = await getPricingSettings();
+    if (active) onChange(settings);
+  };
+  void load();
+  return () => { active = false; };
 }
 
 export async function savePricingSetting(setting: GovernoratePricingSetting): Promise<void> {
   const normalized = normalizePricing(setting, setting.governorate);
-  await setDoc(doc(pricingCollection, normalized.governorate), normalized, { merge: true });
+  await apiFetch(`/takhfid/admin/api/pricing/${encodeURIComponent(normalized.governorate)}`, {
+    method: 'PUT',
+    body: JSON.stringify(normalized),
+  });
 }
 
 export async function seedPricingSettings(): Promise<void> {
-  const snapshot = await getDocs(pricingCollection);
-  if (!snapshot.empty) return;
-  await Promise.all(ALL_GOVERNORATES.map((name) => savePricingSetting(fallbackPricing(name))));
+  const existing = await getPricingSettings();
+  await Promise.all(existing.map((setting) => savePricingSetting(setting)));
 }
 
 export async function getIntegrationSettings(): Promise<IntegrationSettings | null> {
-  const snapshot = await getDoc(integrationRef);
-  return snapshot.exists() ? (snapshot.data() as IntegrationSettings) : null;
+  try {
+    const result = await apiFetch<{ success: boolean; settings: Record<string, string> }>('/takhfid/admin/api/integrations');
+    const values = result.settings || {};
+    return {
+      whatsappSendUrl: values.whatsapp_send_url || '',
+      whatsappApiKey: values.whatsapp_api_key || '',
+      whatsappApiKeyHeader: values.whatsapp_api_key_header || '',
+      whatsappApiKeyPrefix: values.whatsapp_api_key_prefix || '',
+      otpHashSecret: values.otp_hash_secret || '',
+      adminPhones: (values.admin_phones || '').split(',').map((x) => x.trim()).filter(Boolean),
+      apiBaseUrl: values.api_base_url || '',
+    };
+  } catch (error) {
+    console.error('Flask integration settings load failed:', error);
+    return null;
+  }
 }
 
 export async function saveIntegrationSettings(settings: IntegrationSettings): Promise<void> {
-  await setDoc(integrationRef, {
-    ...settings,
-    adminPhones: settings.adminPhones.map((phone) => phone.replace(/\D/g, '')).filter(Boolean),
-    updatedAt: new Date().toISOString(),
-  }, { merge: true });
+  await apiFetch('/takhfid/admin/api/integrations', {
+    method: 'PUT',
+    body: JSON.stringify({
+      whatsapp_session: 'basheer',
+      whatsapp_send_url: settings.whatsappSendUrl,
+      whatsapp_api_key: settings.whatsappApiKey,
+      whatsapp_api_key_header: settings.whatsappApiKeyHeader,
+      whatsapp_api_key_prefix: settings.whatsappApiKeyPrefix,
+      otp_hash_secret: settings.otpHashSecret,
+      admin_phones: settings.adminPhones.join(','),
+    }),
+  });
 }
