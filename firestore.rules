@@ -1,45 +1,72 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isSignedIn() {
+    function signedIn() {
       return request.auth != null;
     }
-
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'bashir7771117@gmail.com' ||
-        request.auth.token.email == 'bashir773255@gmail.com' ||
-        request.auth.token.email == 'bashir7732557@gmail.com'
-      );
+      return signedIn() && request.auth.token.admin == true;
+    }
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
     }
 
-    match /test/{docId} {
-      allow read, write: if true;
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow write: if true;
-    }
-
-    match /deleted_users/{userId} {
-      allow read, write: if true;
-    }
-
-    match /admin_roles/{userId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || isOwner(userId);
+      allow write: if isAdmin();
     }
 
     match /orders/{orderId} {
-      allow read, write: if true;
+      allow create: if false;
+      allow read: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /admin_roles/{userId} {
+      allow read: if isAdmin() || isOwner(userId);
+      allow write: if isAdmin();
+    }
+
+    match /deleted_users/{userId} {
+      allow read, write: if isAdmin();
     }
 
     match /chats/{chatId} {
-      allow read, write: if true;
-
+      allow read, write: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
       match /messages/{messageId} {
-        allow read, write: if true;
+        allow read, write: if isAdmin() || (
+          signedIn() &&
+          get(/databases/$(database)/documents/chats/$(chatId)).data.customerId == request.auth.uid
+        );
       }
+    }
+
+    match /categories/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /banners/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /campaigns/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /otp_requests/{id} {
+      allow read, write: if false;
+    }
+
+    match /test/{id} {
+      allow read, write: if false;
     }
   }
 }
