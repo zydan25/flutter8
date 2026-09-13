@@ -1,0 +1,57 @@
+name: Finalize Order Flow
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/patch-order-flow.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Patch App and Orders modal
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          app = Path('src/App.tsx')
+          s = app.read_text()
+          if "import { OrderChatModal } from './components/OrderChatModal';" not in s:
+              s = s.replace("import { CustomerChatModal } from './components/CustomerChatModal';", "import { CustomerChatModal } from './components/CustomerChatModal';\nimport { OrderChatModal } from './components/OrderChatModal';")
+          if 'const [selectedChatOrder' not in s:
+              s = s.replace("  const [isSupportOpen, setIsSupportOpen] = useState(false);", "  const [isSupportOpen, setIsSupportOpen] = useState(false);\n  const [selectedChatOrder, setSelectedChatOrder] = useState<Order | null>(null);")
+          if "window.addEventListener('openOrderChat'" not in s:
+              marker = "  useEffect(() => { localStorage.setItem('altakhfid_wishlist', JSON.stringify(wishlistIds)); }, [wishlistIds]);"
+              insert = marker + "\n  useEffect(() => { const handler = (event: Event) => { const order = (event as CustomEvent<Order>).detail; if (order) setSelectedChatOrder(order); }; window.addEventListener('openOrderChat', handler); return () => window.removeEventListener('openOrderChat', handler); }, []);"
+              s = s.replace(marker, insert)
+          if 'onOrderPlaced={(newOrder)' in s and 'setSelectedChatOrder(newOrder)' not in s:
+              s = s.replace("onOrderPlaced={(newOrder) => setOrders((current) => [newOrder, ...current.filter((item) => item.id !== newOrder.id)])}", "onOrderPlaced={(newOrder) => { setOrders((current) => [newOrder, ...current.filter((item) => item.id !== newOrder.id)]); setSelectedChatOrder(newOrder); }}")
+          s = s.replace("onClose={() => setIsOrdersOpen(false)} onOpenSupport={() => { setIsOrdersOpen(false); setIsSupportOpen(true); }} />", "onClose={() => setIsOrdersOpen(false)} onOpenSupport={() => { setIsOrdersOpen(false); setIsSupportOpen(true); }} onOpenOrderChat={(order) => setSelectedChatOrder(order)} />")
+          if '<OrderChatModal ' not in s:
+              s = s.replace("      <CustomerChatModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)}/>", "      <CustomerChatModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)}/>\n      <OrderChatModal isOpen={!!selectedChatOrder} order={selectedChatOrder} user={user} onClose={() => setSelectedChatOrder(null)} onOrderChanged={(updated) => setOrders((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item))} onShowToast={showToast}/>")
+          app.write_text(s)
+
+          orders = Path('src/components/OrdersModal.tsx')
+          o = orders.read_text()
+          o = o.replace("import { X, Package, Clock, CheckCircle, Truck, Phone } from 'lucide-react';", "import { X, Package, Clock, CheckCircle, Truck, Phone, MessageCircle } from 'lucide-react';")
+          o = o.replace("  onOpenSupport: () => void;", "  onOpenSupport: () => void;\n  onOpenOrderChat: (order: Order) => void;")
+          o = o.replace("  onOpenSupport,\n})", "  onOpenSupport,\n  onOpenOrderChat,\n})")
+          needle = "                      <span className=\"font-black text-purple-700 text-sm\">\n                    {safeFormatNumber(ord.total)} {ord.currency || currency}\n                  </span>\n                </div>"
+          repl = needle + "\n\n                <button onClick={() => onOpenOrderChat(ord)} className=\"w-full py-2 rounded-xl bg-purple-50 text-purple-700 border border-purple-100 text-xs font-bold flex items-center justify-center gap-1.5\"><MessageCircle className=\"w-4 h-4\"/>فتح محادثة الطلب والدفع</button>"
+          if needle in o and 'فتح محادثة الطلب والدفع' not in o:
+              o = o.replace(needle, repl)
+          orders.write_text(o)
+          PY
+          bun install && bun run typecheck && bun run build
+      - name: Commit and remove patch workflow
+        run: |
+          rm -f .github/workflows/patch-order-flow.yml
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/App.tsx src/components/OrdersModal.tsx .github/workflows/patch-order-flow.yml
+          git commit -m "Finalize order chat and checkout wiring" || exit 0
+          git push
