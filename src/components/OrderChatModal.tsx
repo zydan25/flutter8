@@ -1,0 +1,55 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { X, Send, Paperclip, CheckCircle, Clock, Truck, PackageCheck, Image as ImageIcon } from 'lucide-react';
+import type { ChatMessage, Order, User } from '../types';
+import { createOrUpdateOrderChat, markPaymentSubmitted, sendOrderChatMessage, storage, subscribeToOrderChat, updateOrderStatusInFirestore } from '../firebase';
+import { formatCurrencyPrice } from '../utils/pricing';
+
+interface Props { isOpen: boolean; order: Order | null; user: User | null; onClose: () => void; onOrderChanged?: (order: Order) => void; onShowToast: (message: string, type?: 'success'|'info'|'error') => void; }
+
+const statusLabel = (status: Order['status']) => ({ awaiting_payment: 'بانتظار التحويل', payment_submitted: 'تم إرسال إشعار الدفع', preparing: 'جاري التجهيز', in_shipping: 'جاري الشحن', delivered: 'تم التوصيل', cancelled: 'ملغي' }[status]);
+
+export const OrderChatModal: React.FC<Props> = ({ isOpen, order, user, onClose, onOrderChanged, onShowToast }) => {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (!order || !isOpen) return; createOrUpdateOrderChat(order).catch(console.error); return subscribeToOrderChat(order.id, setMessages); }, [order?.id, isOpen]);
+  if (!isOpen || !order) return null;
+
+  const sendText = async () => {
+    const value = text.trim(); if (!value || !user) return; setBusy(true);
+    try { await sendOrderChatMessage(order.id, { orderId: order.id, senderId: user.uid, senderRole: user.isAdmin ? 'admin' : 'customer', type: 'text', text: value, createdAt: new Date().toISOString() }); setText(''); }
+    catch (e) { console.error(e); onShowToast('تعذر إرسال الرسالة', 'error'); } finally { setBusy(false); }
+  };
+
+  const uploadProof = async (file: File) => {
+    if (!user || !file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) { onShowToast('اختر صورة أقل من 5MB', 'error'); return; }
+    setBusy(true);
+    try {
+      const storageRef = ref(storage, `payment-proofs/${order.id}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`);
+      const uploaded = await uploadBytes(storageRef, file, { contentType: file.type });
+      const url = await getDownloadURL(uploaded.ref);
+      await markPaymentSubmitted(order.id, url, 'إشعار تحويل من العميل');
+      await sendOrderChatMessage(order.id, { orderId: order.id, senderId: user.uid, senderRole: 'customer', type: 'payment_proof', text: 'تم رفع صورة إشعار التحويل، يرجى مراجعة الدفع وتأكيد الطلب.', imageUrl: url, createdAt: new Date().toISOString() });
+      onShowToast('تم إرسال إشعار التحويل للمراجعة ✅', 'success');
+    } catch (e) { console.error(e); onShowToast('تعذر رفع إشعار التحويل', 'error'); } finally { setBusy(false); }
+  };
+
+  const adminSet = async (status: Order['status'], paid?: boolean) => {
+    if (!user?.isAdmin) return; setBusy(true);
+    try { await updateOrderStatusInFirestore(order.id, status, paid); onOrderChanged?.({ ...order, status, isPaid: paid ?? order.isPaid, paymentConfirmedAt: paid ? new Date().toISOString() : order.paymentConfirmedAt }); onShowToast(status === 'preparing' ? 'تم تأكيد الدفع وتجهيز الطلب ✅' : 'تم تحديث حالة الطلب', 'success'); }
+    catch (e) { console.error(e); onShowToast('تعذر تحديث الطلب', 'error'); } finally { setBusy(false); }
+  };
+
+  return <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-3" onClick={onClose}>
+    <div className="bg-white w-full max-w-lg h-[85vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col" onClick={e=>e.stopPropagation()}>
+      <div className="bg-slate-900 text-white px-4 py-3 flex items-center justify-between"><div><div className="font-black text-sm">محادثة الطلب {order.orderNumber}</div><div className="text-[11px] text-slate-300 mt-0.5">{statusLabel(order.status)} · {formatCurrencyPrice(order.total, order.currency)}</div></div><button onClick={onClose}><X className="w-5 h-5"/></button></div>
+      <div className="p-3 bg-slate-50 border-b space-y-2"><div className="text-xs font-bold">تفاصيل الطلب</div><div className="grid grid-cols-2 gap-2 text-[10px]">{order.items.map((item,i)=><div key={i} className="bg-white rounded-xl p-2 border flex gap-2"><img src={item.image} className="w-12 h-12 rounded-lg object-cover"/><div className="min-w-0"><div className="font-bold truncate">{item.productName}</div><div className="text-slate-500">الكمية: {item.quantity}</div>{item.color&&<div className="text-slate-500">اللون: {item.color}</div>}{item.size&&<div className="text-slate-500">المقاس: {item.size}</div>}</div></div>)}</div><div className="flex justify-between text-xs font-black"><span>طريقة الدفع: {order.paymentMethod}</span><span>{formatCurrencyPrice(order.total, order.currency)}</span></div></div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-white">{messages.length===0?<div className="h-full flex items-center justify-center text-xs text-slate-400">ابدأ المحادثة حول هذا الطلب</div>:messages.map(m=><div key={m.id} className={`flex ${m.senderId===user?.uid?'justify-start':'justify-end'}`}><div className={`max-w-[85%] rounded-2xl p-2.5 text-xs ${m.senderId===user?.uid?'bg-purple-50 text-slate-800':'bg-slate-100 text-slate-800'}`}>{m.type==='payment_proof'&&m.imageUrl&&<img src={m.imageUrl} className="w-full max-h-64 object-contain rounded-xl mb-2 bg-white"/>}{m.text&&<div>{m.text}</div>}<div className="text-[9px] text-slate-400 mt-1">{new Date(m.createdAt).toLocaleString('ar-YE')}</div></div></div>)}</div>
+      {user?.isAdmin && <div className="p-2 bg-amber-50 border-t border-amber-100 flex gap-2 flex-wrap"><button disabled={busy} onClick={()=>adminSet('preparing',true)} className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-[10px] font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3"/>تأكيد الدفع</button><button disabled={busy} onClick={()=>adminSet('in_shipping',true)} className="px-3 py-1.5 rounded-xl bg-blue-600 text-white text-[10px] font-bold flex items-center gap-1"><Truck className="w-3 h-3"/>بدء الشحن</button><button disabled={busy} onClick={()=>adminSet('delivered',true)} className="px-3 py-1.5 rounded-xl bg-slate-800 text-white text-[10px] font-bold flex items-center gap-1"><PackageCheck className="w-3 h-3"/>تم التسليم</button></div>}
+      {order.status!=='delivered'&&order.status!=='cancelled'&&<div className="p-3 border-t bg-slate-50"><div className="flex items-center gap-2"><input ref={fileRef} type="file" accept="image/*" hidden onChange={e=>{const f=e.target.files?.[0];if(f)uploadProof(f);e.currentTarget.value='';}}/><button type="button" onClick={()=>fileRef.current?.click()} disabled={busy || user?.isAdmin} className="w-10 h-10 rounded-xl bg-white border flex items-center justify-center disabled:opacity-40" title="إرسال إشعار التحويل"><Paperclip className="w-4 h-4"/></button><input value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')sendText();}} placeholder={user?.isAdmin?'اكتب رد المتجر...':'اكتب رسالتك...'} className="flex-1 p-2.5 rounded-xl border text-xs"/><button onClick={sendText} disabled={busy || !text.trim()} className="w-10 h-10 rounded-xl bg-purple-600 text-white flex items-center justify-center disabled:opacity-40"><Send className="w-4 h-4"/></button></div><div className="text-[9px] text-slate-400 mt-1 flex items-center gap-1"><ImageIcon className="w-3 h-3"/> للعميل: زر المشبك لرفع صورة إشعار التحويل</div></div>}
+    </div>
+  </div>;
+};
