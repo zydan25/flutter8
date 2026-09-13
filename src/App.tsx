@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
 import type { Product, Category, Banner, TrendCampaign, CartItem, Order, User } from './types';
 import { INITIAL_CATEGORIES } from './data/categories';
 import { INITIAL_PRODUCTS } from './data/products';
 import { INITIAL_BANNERS } from './data/banners';
 import { INITIAL_TREND_CAMPAIGNS, INITIAL_TREND_HASHTAGS } from './data/trends';
-import { auth, fetchUserProfile, subscribeToOrdersForUser, subscribeToAllOrders, subscribeToProducts, seedProductsToFirestore, saveProductToFirestore, deleteProductFromFirestore, updateOrderStatusInFirestore } from './firebase';
+import { subscribeToOrdersForUser, subscribeToAllOrders, subscribeToProducts, seedProductsToFirestore, saveProductToFirestore, deleteProductFromFirestore, updateOrderStatusInFirestore } from './firebase';
+import { fetchCurrentUser, logoutApi, mirrorProductsToFlask, saveFlaskProduct, deleteFlaskProduct } from './api';
 import { Header } from './components/Header';
 import { BottomNavigation } from './components/BottomNavigation';
 import { ProductCard } from './components/ProductCard';
@@ -61,17 +61,14 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) { setUser(null); setOrders([]); return; }
-      try {
-        const profile = await fetchUserProfile(firebaseUser.uid);
-        setUser(profile || { uid: firebaseUser.uid, phone: (firebaseUser.phoneNumber || '').replace(/^\+/, ''), role: 'customer', isAdmin: false });
-      } catch (error) {
-        console.error('Failed to load signed-in profile:', error);
-        showToast('تعذر تحميل ملف الحساب', 'error');
-      }
+    let cancelled = false;
+    fetchCurrentUser().then((currentUser) => {
+      if (cancelled) return;
+      setUser(currentUser as User | null);
+    }).catch((error) => {
+      console.error('Failed to restore Flask session:', error);
     });
-    return unsubscribe;
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -84,11 +81,15 @@ export const App: React.FC = () => {
     return subscribeToProducts((remoteProducts) => {
       if (remoteProducts.length > 0) {
         setProducts(remoteProducts);
+        if (user?.isAdmin) {
+          mirrorProductsToFlask(remoteProducts).catch((error) => console.error('Flask product mirror failed:', error));
+        }
         return;
       }
       if (user?.isAdmin && !seeded) {
         seeded = true;
         seedProductsToFirestore(INITIAL_PRODUCTS).catch((error) => console.error('Product seed failed:', error));
+        mirrorProductsToFlask(INITIAL_PRODUCTS).catch((error) => console.error('Flask initial product mirror failed:', error));
       }
     });
   }, [user?.isAdmin]);
@@ -130,7 +131,7 @@ export const App: React.FC = () => {
   };
   const handleRemoveCartItem = (productId: string) => { setCartItems((prev) => prev.filter((item) => item.product.id !== productId)); };
   const handleToggleWishlist = (productId: string) => setWishlistIds((prev) => prev.includes(productId) ? prev.filter((id) => id !== productId) : [...prev, productId]);
-  const handleLogout = async () => { try { await signOut(auth); } catch (error) { console.error(error); showToast('تعذر تسجيل الخروج', 'error'); } };
+  const handleLogout = async () => { try { await logoutApi(); setUser(null); setOrders([]); showToast('تم تسجيل الخروج', 'success'); } catch (error) { console.error(error); showToast('تعذر تسجيل الخروج', 'error'); } };
 
   const wishlistProducts = useMemo(() => products.filter((product) => wishlistIds.includes(product.id)), [products, wishlistIds]);
   const displayedProducts = useMemo(() => selectedCategoryId === 'all' ? products : products.filter((product) => product.categoryId === selectedCategoryId), [products, selectedCategoryId]);
@@ -172,7 +173,7 @@ export const App: React.FC = () => {
       <WishlistModal isOpen={isWishlistOpen} wishlistProducts={wishlistProducts} currency={currency} onClose={() => setIsWishlistOpen(false)} onToggleWishlist={handleToggleWishlist} onAddToCart={handleAddToCart} onSelectProduct={(product) => { setIsWishlistOpen(false); setSelectedProduct(product); }}/>
       <CategoryModal isOpen={isCategoryModalOpen} categories={categories} selectedCategoryId={selectedCategoryId} onClose={() => setIsCategoryModalOpen(false)} onSelectCategory={(id) => { setSelectedCategoryId(id); setActiveTab('home'); }}/>
       <SearchModal isOpen={isSearchOpen} products={products} currency={currency} onClose={() => setIsSearchOpen(false)} onSelectProduct={setSelectedProduct}/>
-      <AdminModal isOpen={isAdminOpen} orders={orders} products={products} campaigns={campaigns} onClose={() => setIsAdminOpen(false)} onUpdateOrderStatus={(orderId, status, isPaid) => { setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, isPaid: isPaid ?? order.isPaid } : order)); updateOrderStatusInFirestore(orderId, status, isPaid).catch((error) => { console.error(error); showToast('فشل تحديث الطلب في قاعدة البيانات', 'error'); }); }} onSaveProduct={(product) => { setProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]); saveProductToFirestore(product).then(() => showToast('تم حفظ المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حفظ المنتج', 'error'); }); }} onDeleteProduct={(productId) => { setProducts((current) => current.filter((item) => item.id !== productId)); deleteProductFromFirestore(productId).then(() => showToast('تم حذف المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حذف المنتج', 'error'); }); }} onUpdateCampaigns={setCampaigns} onShowToast={showToast}/>
+      <AdminModal isOpen={isAdminOpen} orders={orders} products={products} campaigns={campaigns} onClose={() => setIsAdminOpen(false)} onUpdateOrderStatus={(orderId, status, isPaid) => { setOrders((current) => current.map((order) => order.id === orderId ? { ...order, status, isPaid: isPaid ?? order.isPaid } : order)); updateOrderStatusInFirestore(orderId, status, isPaid).catch((error) => { console.error(error); showToast('فشل تحديث الطلب في قاعدة البيانات', 'error'); }); }} onSaveProduct={(product) => { setProducts((current) => [product, ...current.filter((item) => item.id !== product.id)]); Promise.all([saveProductToFirestore(product), saveFlaskProduct(product)]).then(() => showToast('تم حفظ المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حفظ المنتج', 'error'); }); }} onDeleteProduct={(productId) => { setProducts((current) => current.filter((item) => item.id !== productId)); Promise.all([deleteProductFromFirestore(productId), deleteFlaskProduct(productId)]).then(() => showToast('تم حذف المنتج ✅')).catch((error) => { console.error(error); showToast('فشل حذف المنتج', 'error'); }); }} onUpdateCampaigns={setCampaigns} onShowToast={showToast}/>
       <OrdersModal isOpen={isOrdersOpen} orders={orders} currency={currency} onClose={() => setIsOrdersOpen(false)} onOpenSupport={() => { setIsOrdersOpen(false); setIsSupportOpen(true); }} onOpenOrderChat={(order) => setSelectedChatOrder(order)}/>
       <AuthModal isOpen={isAuthOpen} user={user} onClose={() => setIsAuthOpen(false)} onLogin={setUser} onLogout={handleLogout} onShowToast={showToast}/>
       <CustomerChatModal isOpen={isSupportOpen} onClose={() => setIsSupportOpen(false)}/>
