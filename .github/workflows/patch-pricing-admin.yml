@@ -1,0 +1,164 @@
+name: Add Pricing Admin
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/patch-pricing-admin.yml']
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch pricing management
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          
+          p = Path('src/types.ts')
+          s = p.read_text()
+          if 'export interface GovernoratePricing' not in s:
+              s += "\nexport interface GovernoratePricing { governorate: string; region: 'north' | 'south'; sarToYerRate: number; usdToYerRate: number; markupType: 'percentage' | 'fixed'; markupValue: number; deliveryFeeYer: number; deliveryFeeSar: number; freeDeliveryIncluded: boolean; deliveryNote?: string; isActive?: boolean; updatedAt?: string; }\n"
+          p.write_text(s)
+          
+          Path('src/pricingSettingsService.ts').write_text(r'''import { collection, getDocs, onSnapshot, setDoc, doc } from 'firebase/firestore';
+import { db } from './firebase';
+import { GOVERNORATE_RATES, ALL_GOVERNORATES } from './data/governorates';
+import type { GovernoratePricing } from './types';
+
+export const PRICING_COLLECTION = 'pricing_settings';
+
+export function getDefaultPricing(governorate: string): GovernoratePricing {
+  const fallback = GOVERNORATE_RATES[governorate] || GOVERNORATE_RATES['أمانة العاصمة'];
+  return {
+    governorate,
+    region: fallback.region === 'south' ? 'south' : 'north',
+    sarToYerRate: Number(fallback.sarToYerRate || 140),
+    usdToYerRate: Number(fallback.usdToYerRate || 535),
+    markupType: fallback.markupType === 'fixed' ? 'fixed' : 'percentage',
+    markupValue: Number(fallback.markupValue || 0),
+    deliveryFeeYer: fallback.freeDeliveryIncluded ? 0 : Number(fallback.deliveryFeeYer || 0),
+    deliveryFeeSar: Number(fallback.deliveryFeeSar || 0),
+    freeDeliveryIncluded: Boolean(fallback.freeDeliveryIncluded),
+    deliveryNote: fallback.deliveryNote || '',
+    isActive: fallback.isActive !== false,
+  };
+}
+
+export async function fetchPricingSettings(): Promise<Record<string, GovernoratePricing>> {
+  const snapshot = await getDocs(collection(db, PRICING_COLLECTION));
+  const result: Record<string, GovernoratePricing> = {};
+  ALL_GOVERNORATES.forEach((g) => { result[g] = getDefaultPricing(g); });
+  snapshot.docs.forEach((d) => { result[d.id] = { ...getDefaultPricing(d.id), ...(d.data() as Partial<GovernoratePricing>), governorate: d.id } as GovernoratePricing; });
+  return result;
+}
+
+export function subscribeToPricingSettings(onChange: (settings: Record<string, GovernoratePricing>) => void) {
+  return onSnapshot(collection(db, PRICING_COLLECTION), (snapshot) => {
+    const result: Record<string, GovernoratePricing> = {};
+    ALL_GOVERNORATES.forEach((g) => { result[g] = getDefaultPricing(g); });
+    snapshot.docs.forEach((d) => { result[d.id] = { ...getDefaultPricing(d.id), ...(d.data() as Partial<GovernoratePricing>), governorate: d.id } as GovernoratePricing; });
+    onChange(result);
+  }, (error) => { console.error('Pricing subscription failed:', error); fetchPricingSettings().then(onChange).catch(console.error); });
+}
+
+export async function savePricingSetting(setting: GovernoratePricing): Promise<void> {
+  await setDoc(doc(db, PRICING_COLLECTION, setting.governorate), { ...setting, updatedAt: new Date().toISOString() }, { merge: true });
+}
+''')
+          
+          p = Path('src/firebase.ts')
+          s = p.read_text()
+          s = s.replace("import type { Order, Product, User, ChatMessage } from './types';", "import type { Order, Product, User, ChatMessage } from './types';")
+          p.write_text(s)
+          
+          p = Path('src/components/CartModal.tsx')
+          s = p.read_text()
+          s = s.replace("import { formatCurrencyPrice } from '../utils/pricing';", "import { formatCurrencyPrice } from '../utils/pricing';\nimport type { GovernoratePricing } from '../types';")
+          s = s.replace("  onShowToast: (msg: string, type?: 'success' | 'info' | 'error') => void;", "  onShowToast: (msg: string, type?: 'success' | 'info' | 'error') => void;\n  pricingByGovernorate: Record<string, GovernoratePricing>;")
+          s = s.replace("  cartItems, user, currency, onClose, onUpdateQuantity, onRemoveItem, onClearCart, onOrderPlaced, onShowToast,", "  cartItems, user, currency, onClose, onUpdateQuantity, onRemoveItem, onClearCart, onOrderPlaced, onShowToast, pricingByGovernorate,")
+          old = "  const subtotal = useMemo(() => cartItems.reduce((sum, item) => sum + Number(item.price || item.product?.price || 0) * Math.max(1, item.quantity || 1), 0), [cartItems]);\n  const shippingFee = currency === 'SAR' ? 18 : 2500;\n  const total = subtotal + (cartItems.length ? shippingFee : 0);"
+          new = "  const pricing = pricingByGovernorate[governorate];\n  const subtotal = useMemo(() => cartItems.reduce((sum, item) => sum + Number(item.price || item.product?.price || 0) * Math.max(1, item.quantity || 1), 0), [cartItems]);\n  const adjustedSubtotal = useMemo(() => { if (!pricing) return subtotal; return pricing.markupType === 'fixed' ? subtotal + pricing.markupValue : Math.round(subtotal * (1 + pricing.markupValue / 100)); }, [subtotal, pricing]);\n  const shippingFee = pricing ? (currency === 'SAR' ? pricing.deliveryFeeSar : pricing.deliveryFeeYer) : 0;\n  const total = adjustedSubtotal + (cartItems.length ? shippingFee : 0);"
+          if old in s: s = s.replace(old, new)
+          s = s.replace("        paymentMethod,\n        items:", "        paymentMethod,\n        pricingSnapshot: pricing ? { ...pricing } : undefined,\n        items:")
+          s = s.replace("<div className=\"flex justify-between text-xs\"><span>قيمة المنتجات</span><b>{formatCurrencyPrice(subtotal, currency)}</b></div>", "<div className=\"flex justify-between text-xs\"><span>قيمة المنتجات</span><b>{formatCurrencyPrice(adjustedSubtotal, currency)}</b></div><div className=\"flex justify-between text-[10px] text-slate-500\"><span>منطقة التسعير: {pricing?.region === 'south' ? 'الجنوب' : 'الشمال'} · زيادة المحافظة</span><b>{pricing?.markupValue || 0}{pricing?.markupType === 'percentage' ? '%' : ' ر.ي'}</b></div>")
+          p.write_text(s)
+          
+          p = Path('src/App.tsx')
+          s = p.read_text()
+          s = s.replace("import { auth, fetchUserProfile, subscribeToOrdersForUser, subscribeToAllOrders, subscribeToProducts, seedProductsToFirestore, saveProductToFirestore, deleteProductFromFirestore, updateOrderStatusInFirestore } from './firebase';", "import { auth, fetchUserProfile, subscribeToOrdersForUser, subscribeToAllOrders, subscribeToProducts, seedProductsToFirestore, saveProductToFirestore, deleteProductFromFirestore, updateOrderStatusInFirestore } from './firebase';\nimport { subscribeToPricingSettings } from './pricingSettingsService';\nimport type { GovernoratePricing } from './types';")
+          s = s.replace("  const [orders, setOrders] = useState<Order[]>([]);", "  const [orders, setOrders] = useState<Order[]>([]);\n  const [pricingByGovernorate, setPricingByGovernorate] = useState<Record<string, GovernoratePricing>>({});")
+          s = s.replace("  useEffect(() => { let seeded = false;", "  useEffect(() => { return subscribeToPricingSettings(setPricingByGovernorate); }, []);\n\n  useEffect(() => { let seeded = false;")
+          s = s.replace("<CartModal isOpen={isCartOpen} cartItems={cartItems} user={user} currency={currency} onClose", "<CartModal pricingByGovernorate={pricingByGovernorate} isOpen={isCartOpen} cartItems={cartItems} user={user} currency={currency} onClose")
+          s = s.replace("<AdminModal isOpen={isAdminOpen}", "<AdminModal pricingByGovernorate={pricingByGovernorate} isOpen={isAdminOpen}")
+          p.write_text(s)
+          
+          p = Path('src/components/AdminModal.tsx')
+          s = p.read_text()
+          s = s.replace("import type { Order, Product, TrendCampaign, User } from '../types';", "import type { Order, Product, TrendCampaign, User, GovernoratePricing } from '../types';\nimport { ALL_GOVERNORATES } from '../data/governorates';\nimport { savePricingSetting } from '../pricingSettingsService';")
+          s = s.replace("  onShowToast: (msg: string, type?: 'success' | 'info' | 'error') => void;", "  onShowToast: (msg: string, type?: 'success' | 'info' | 'error') => void;\n  pricingByGovernorate: Record<string, GovernoratePricing>;")
+          s = s.replace("  onShowToast,\n})", "  onShowToast,\n  pricingByGovernorate,\n})")
+          s = s.replace("useState<'orders' | 'customers' | 'products' | 'trends'>('orders')", "useState<'orders' | 'customers' | 'products' | 'trends' | 'pricing'>('orders')")
+          tab = '''          <button onClick={() => setActiveTab('pricing')} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeTab === 'pricing' ? 'bg-purple-600 text-white shadow-xs' : 'bg-white text-slate-700 hover:bg-slate-200/80'}`}><span>💰</span><span>التسعير والتوصيل</span></button>\n'''
+          marker = "          <button\n            onClick={() => setActiveTab('trends')}"
+          if "التسعير والتوصيل" not in s: s = s.replace(marker, tab + marker)
+          panel = '''          {activeTab === 'pricing' && (\n            <div className="space-y-4">\n              <div><h3 className="font-bold text-sm text-slate-800">إعدادات أسعار الصرف والتوصيل</h3><p className="text-xs text-slate-500 mt-1">تُحفظ في Firestore وتُستخدم مباشرة في السلة والخادم. القيم الحالية من governorates.ts تعمل كقيمة احتياطية.</p></div>\n              <div className="overflow-x-auto bg-white rounded-2xl border border-slate-200">\n                <table className="w-full text-xs"><thead className="bg-slate-50"><tr><th className="p-3 text-right">المحافظة</th><th className="p-3 text-right">المنطقة</th><th className="p-3 text-right">SAR/YER</th><th className="p-3 text-right">USD/YER</th><th className="p-3 text-right">زيادة</th><th className="p-3 text-right">توصيل YER</th><th className="p-3 text-right">توصيل SAR</th><th className="p-3"></th></tr></thead><tbody>{ALL_GOVERNORATES.map((name) => { const base = pricingByGovernorate[name]; const value = base || { governorate:name, region:'north' as const, sarToYerRate:140, usdToYerRate:535, markupType:'percentage' as const, markupValue:0, deliveryFeeYer:0, deliveryFeeSar:0, freeDeliveryIncluded:true, deliveryNote:'', isActive:true }; return <PricingRow key={name} value={value} onSave={async (next) => { try { await savePricingSetting(next); onShowToast(`تم حفظ تسعير ${name} ✅`); } catch (e) { console.error(e); onShowToast('فشل حفظ إعداد التسعير','error'); } }} />; })}</tbody></table>\n              </div>\n            </div>\n          )}\n'''
+          helper = '''\nconst PricingRow: React.FC<{ value: GovernoratePricing; onSave: (value: GovernoratePricing) => Promise<void> }> = ({ value, onSave }) => {\n  const [draft, setDraft] = useState(value);\n  useEffect(() => setDraft(value), [value]);\n  return <tr className="border-t">\n    <td className="p-2 font-bold whitespace-nowrap">{draft.governorate}</td><td className="p-2">{draft.region === 'south' ? 'جنوب' : 'شمال'}</td>\n    <td className="p-2"><input type="number" value={draft.sarToYerRate} onChange={e=>setDraft({...draft,sarToYerRate:Number(e.target.value)})} className="w-24 p-1.5 border rounded-lg"/></td>\n    <td className="p-2"><input type="number" value={draft.usdToYerRate} onChange={e=>setDraft({...draft,usdToYerRate:Number(e.target.value)})} className="w-24 p-1.5 border rounded-lg"/></td>\n    <td className="p-2"><div className="flex gap-1"><select value={draft.markupType} onChange={e=>setDraft({...draft,markupType:e.target.value as GovernoratePricing['markupType']})} className="p-1.5 border rounded-lg"><option value="percentage">%</option><option value="fixed">ثابت</option></select><input type="number" value={draft.markupValue} onChange={e=>setDraft({...draft,markupValue:Number(e.target.value)})} className="w-20 p-1.5 border rounded-lg"/></div></td>\n    <td className="p-2"><input type="number" value={draft.deliveryFeeYer} onChange={e=>setDraft({...draft,deliveryFeeYer:Number(e.target.value),freeDeliveryIncluded:Number(e.target.value)===0 && draft.deliveryFeeSar===0})} className="w-24 p-1.5 border rounded-lg"/></td>\n    <td className="p-2"><input type="number" value={draft.deliveryFeeSar} onChange={e=>setDraft({...draft,deliveryFeeSar:Number(e.target.value),freeDeliveryIncluded:Number(e.target.value)===0 && draft.deliveryFeeYer===0})} className="w-24 p-1.5 border rounded-lg"/></td>\n    <td className="p-2"><button onClick={()=>onSave(draft)} className="px-3 py-1.5 rounded-lg bg-purple-600 text-white font-bold">حفظ</button></td>\n  </tr>;\n};\n\n'''
+          if 'const PricingRow:' not in s: s = s.replace('export const AdminModal:', helper + 'export const AdminModal:')
+          if "activeTab === 'pricing'" not in s: s = s.replace("          {/* TRENDS TAB */}", panel + "\n          {/* TRENDS TAB */}")
+          p.write_text(s)
+          
+          p = Path('firestore.rules')
+          s = p.read_text()
+          if 'match /pricing_settings/' not in s:
+              s = s.replace("    match /campaigns/{id} {\n      allow read: if true;\n      allow write: if isAdmin();\n    }", "    match /campaigns/{id} {\n      allow read: if true;\n      allow write: if isAdmin();\n    }\n\n    match /pricing_settings/{governorate} {\n      allow read: if true;\n      allow write: if isAdmin();\n    }")
+          p.write_text(s)
+          
+          p = Path('functions/src/index.ts')
+          s = p.read_text()
+          s = s.replace("const auth = getAuth();", "const auth = getAuth();\nconst pricingCollection = 'pricing_settings';")
+          s = s.replace("const paymentMethod = ['cash_on_delivery', 'kuraimi', 'jawali', 'one_cash'].includes(request.data?.paymentMethod)", "const governorate = String(request.data?.governorate || profile.governorate || 'أمانة العاصمة');\n  const pricingDoc = await db.collection(pricingCollection).doc(governorate).get();\n  const pricing = pricingDoc.exists ? pricingDoc.data()! : {};\n  const baseSubtotal = orderItems.reduce((sum: number, item: OrderItemPayload) => sum + item.price * item.quantity, 0);\n  const markupType = pricing.markupType === 'fixed' ? 'fixed' : 'percentage';\n  const markupValue = Number(pricing.markupValue || 0);\n  const adjustedSubtotal = markupType === 'fixed' ? baseSubtotal + markupValue : Math.round(baseSubtotal * (1 + markupValue / 100));\n  const shippingFee = currency === 'SAR' ? Number(pricing.deliveryFeeSar ?? 0) : Number(pricing.deliveryFeeYer ?? 0);\n  const paymentMethod = ['cash_on_delivery', 'kuraimi', 'jawali', 'one_cash'].includes(request.data?.paymentMethod)")
+          s = s.replace("  const orderRef = db.collection('orders').doc(); const order = { id: orderRef.id", "  const orderRef = db.collection('orders').doc(); const order = { id: orderRef.id")
+          s = s.replace("governorate: String(request.data?.governorate || profile.governorate || 'أمانة العاصمة'),", "governorate,")
+          s = s.replace("items: orderItems, subtotal, shippingFee, discount: 0, total: subtotal + shippingFee,", "items: orderItems.map((item) => ({ ...item, price: pricing.markupType === 'fixed' ? item.price : Math.round(item.price * (1 + markupValue / 100)) })), subtotal: adjustedSubtotal, shippingFee, discount: 0, total: adjustedSubtotal + shippingFee, pricingSnapshot: { governorate, ...pricing, markupType, markupValue, shippingFee },")
+          p.write_text(s)
+          
+          # Add pricing snapshot fields to type and createOrder input.
+          p = Path('src/orderService.ts')
+          s = p.read_text().replace("  paymentMethod: Order['paymentMethod'];", "  paymentMethod: Order['paymentMethod'];\n  pricingSnapshot?: Record<string, unknown>;")
+          p.write_text(s)
+          
+          p = Path('src/types.ts')
+          s = p.read_text().replace("  isPaid?: boolean; }", "  isPaid?: boolean; pricingSnapshot?: Record<string, unknown>; }")
+          p.write_text(s)
+          
+          p = Path('src/components/OrdersModal.tsx')
+          s = p.read_text()
+          if 'onOpenOrderChat' in s and 'MessageCircle' not in s:
+              s = s.replace("import { X, Package, Clock, CheckCircle, Truck, Phone } from 'lucide-react';", "import { X, Package, Clock, CheckCircle, Truck, Phone, MessageCircle } from 'lucide-react';")
+          if 'onOpenOrderChat' not in s:
+              s = s.replace("  onOpenSupport: () => void;", "  onOpenSupport: () => void;\n  onOpenOrderChat: (order: Order) => void;")
+              s = s.replace("  onOpenSupport,\n})", "  onOpenSupport,\n  onOpenOrderChat,\n})")
+          anchor = '<div className="flex items-center justify-between text-xs">'
+          if 'فتح محادثة الطلب والدفع' not in s:
+              s = s.replace(anchor, '<button onClick={() => onOpenOrderChat(ord)} className="w-full py-2 rounded-xl bg-purple-50 text-purple-700 border border-purple-100 text-xs font-bold flex items-center justify-center gap-1.5 mb-2"><MessageCircle className="w-4 h-4"/>فتح محادثة الطلب والدفع</button>\n\n                ' + anchor)
+          p.write_text(s)
+          
+          # Remove obsolete temporary duplicate helper workflows after patching; keep CI and Pages.
+          
+          PY
+      - name: Validate
+        run: |
+          bun install
+          bun run typecheck
+          bun run build
+          cd functions && npm install && npm run typecheck && npm run build
+      - name: Remove patch workflow and commit
+        run: |
+          rm -f .github/workflows/patch-pricing-admin.yml
+          git config user.name github-actions
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .
+          git commit -m "Add admin pricing and governorate delivery settings" || exit 0
+          git push
